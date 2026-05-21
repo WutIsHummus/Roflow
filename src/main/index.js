@@ -162,13 +162,14 @@ async function inspectTripoWebSession(baseUrl, generateUrl) {
 }
 
 async function navigateToTripoGenerateSurface(win, baseUrl, generateUrl) {
+  const normalizedBaseUrl = normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL).replace(/\/$/, '')
   const candidates = Array.from(
     new Set([
       normalizeExternalUrl(generateUrl, DEFAULT_TRIPO_WEB_GENERATE_URL),
       normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL),
-      `${normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL).replace(/\\/$/, '')}/app`,
-      `${normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL).replace(/\\/$/, '')}/generate`,
-      `${normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL).replace(/\\/$/, '')}/text-to-3d`
+      `${normalizedBaseUrl}/app`,
+      `${normalizedBaseUrl}/generate`,
+      `${normalizedBaseUrl}/text-to-3d`
     ])
   )
 

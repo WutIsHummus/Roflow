@@ -281,7 +281,11 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
             <p style={{ fontSize: 13, color: '#555b6e', marginTop: 3 }}>
               Build assets part by part ·{' '}
               {provider === 'tripo'
-                ? 'Tripo3D API (high quality)'
+                ? tripoOpts.authMode === 'web'
+                  ? 'Tripo browser session automation'
+                  : tripoOpts.authMode === 'sdk'
+                    ? 'Tripo SDK via TRIPO_API_KEY'
+                    : 'Tripo direct API key (legacy)'
                 : provider === 'comfyui'
                   ? 'ComfyUI + Tripo Nodes (auth via TRIPO_API_KEY env)'
                   : 'HuggingFace (free)'}
