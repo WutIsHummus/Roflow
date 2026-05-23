@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 const DEFAULT_WORKFLOW = {
+  provider: 'replicate',
   assetType: 'shirt',
   designPrompt: '',
   colorPalette: '',
@@ -16,9 +17,54 @@ const DEFAULT_WORKFLOW = {
 }
 
 const REPLICATE_MODEL = 'black-forest-labs/flux-kontext-pro'
-const REPLICATE_URL = `https://replicate.com/${REPLICATE_MODEL}`
 const BUNDLED_SHIRT_TEMPLATE_URL = '/roblox-classic-shirt-template.png'
 const BUNDLED_SHIRT_TEMPLATE_LABEL = 'Built-in Roblox shirt template'
+
+const PROVIDERS = {
+  replicate: {
+    label: 'Replicate FLUX',
+    accent: '#a78bfa',
+    generateLabel: 'Generate with Replicate'
+  },
+  manus: {
+    label: 'Manus',
+    accent: '#60a5fa',
+    generateLabel: 'Generate with Manus'
+  },
+  'chatgpt-image': {
+    label: 'ChatGPT Image',
+    accent: '#34d399',
+    generateLabel: 'Generate with ChatGPT Image'
+  }
+}
+
+const DEFAULT_PROVIDER_WEB_CONFIG = {
+  manusLoginUrl: 'https://manus.im/',
+  manusWorkspaceUrl: 'https://manus.im/',
+  chatgptLoginUrl: 'https://chatgpt.com/auth/login',
+  chatgptWorkspaceUrl: 'https://chatgpt.com/'
+}
+
+const DEFAULT_PROVIDER_SESSION_STATE = {
+  manus: {
+    checked: false,
+    loading: false,
+    connected: false,
+    loginDetected: false,
+    cookieCount: 0,
+    promptCandidates: 0,
+    error: null
+  },
+  'chatgpt-image': {
+    checked: false,
+    loading: false,
+    connected: false,
+    loginDetected: false,
+    cookieCount: 0,
+    promptCandidates: 0,
+    error: null
+  }
+}
 
 function buildPromptPack(workflow) {
   const hardRequirements = [
@@ -212,6 +258,11 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState('')
   const [progress, setProgress] = useState(null)
+  const [providerWebConfig, setProviderWebConfig] = useState(DEFAULT_PROVIDER_WEB_CONFIG)
+  const [providerWebConfigLoaded, setProviderWebConfigLoaded] = useState(
+    () => !window.api?.configGet
+  )
+  const [providerSessionState, setProviderSessionState] = useState(DEFAULT_PROVIDER_SESSION_STATE)
 
   useEffect(() => {
     if (workflowState?.clothingWorkflow?.templateDataUrl) return
@@ -266,11 +317,144 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
     return unsubscribe
   }, [])
 
+  useEffect(() => {
+    let active = true
+    if (!window.api?.configGet) return undefined
+
+    window.api
+      .configGet('clothingProviderWebConfig')
+      .then((saved) => {
+        if (!active) return
+        if (saved && typeof saved === 'object') {
+          setProviderWebConfig((prev) => ({ ...prev, ...saved }))
+        }
+        setProviderWebConfigLoaded(true)
+      })
+      .catch(() => {
+        if (active) setProviderWebConfigLoaded(true)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!providerWebConfigLoaded || !window.api?.configSet) return
+    window.api.configSet('clothingProviderWebConfig', providerWebConfig)
+  }, [providerWebConfig, providerWebConfigLoaded])
+
   const promptPack = useMemo(() => buildPromptPack(workflow), [workflow])
 
   const updateWorkflow = useCallback((changes) => {
     setWorkflow((prev) => ({ ...prev, ...changes }))
   }, [])
+
+  const getProviderWebOptions = useCallback(
+    (providerId) => {
+      if (providerId === 'manus') {
+        return {
+          loginUrl: providerWebConfig.manusLoginUrl,
+          workspaceUrl: providerWebConfig.manusWorkspaceUrl
+        }
+      }
+      return {
+        loginUrl: providerWebConfig.chatgptLoginUrl,
+        workspaceUrl: providerWebConfig.chatgptWorkspaceUrl
+      }
+    },
+    [providerWebConfig]
+  )
+
+  const refreshProviderStatus = useCallback(
+    async (providerId) => {
+      const options = getProviderWebOptions(providerId)
+      setProviderSessionState((prev) => ({
+        ...prev,
+        [providerId]: { ...prev[providerId], loading: true, error: null }
+      }))
+
+      const result =
+        providerId === 'manus'
+          ? await window.api.manusWebSessionStatus(options)
+          : await window.api.chatgptWebSessionStatus(options)
+
+      setProviderSessionState((prev) => ({
+        ...prev,
+        [providerId]: {
+          checked: true,
+          loading: false,
+          connected: Boolean(result?.connected),
+          loginDetected: Boolean(result?.loginDetected),
+          cookieCount: Number(result?.cookieCount || 0),
+          promptCandidates: Number(result?.promptCandidates || 0),
+          error: result?.success === false ? result.error || 'Session check failed.' : null
+        }
+      }))
+    },
+    [getProviderWebOptions]
+  )
+
+  useEffect(() => {
+    if (!providerWebConfigLoaded) return
+    const timeout = window.setTimeout(() => {
+      refreshProviderStatus('manus')
+      refreshProviderStatus('chatgpt-image')
+    }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [providerWebConfigLoaded, refreshProviderStatus])
+
+  const openProviderLogin = useCallback(
+    async (providerId) => {
+      const options = getProviderWebOptions(providerId)
+      const result =
+        providerId === 'manus'
+          ? await window.api.manusWebOpenLogin(options)
+          : await window.api.chatgptWebOpenLogin(options)
+
+      if (!result?.success) {
+        setNotice(result?.error || 'Could not open provider login.')
+        return
+      }
+      setNotice(providerId === 'manus' ? 'Opened Manus login.' : 'Opened ChatGPT login.')
+    },
+    [getProviderWebOptions]
+  )
+
+  const openProviderWorkspace = useCallback(
+    async (providerId) => {
+      const options = getProviderWebOptions(providerId)
+      const result =
+        providerId === 'manus'
+          ? await window.api.manusWebOpenWorkspace(options)
+          : await window.api.chatgptWebOpenWorkspace(options)
+
+      if (!result?.success) {
+        setNotice(result?.error || 'Could not open provider workspace.')
+        return false
+      }
+      return true
+    },
+    [getProviderWebOptions]
+  )
+
+  const copyPromptForProvider = useCallback(async () => {
+    const result = await window.api.copyText(promptPack.finalPrompt)
+    if (!result?.success) {
+      setNotice(result?.error || 'Could not copy prompt.')
+      return false
+    }
+    setNotice('Prompt copied.')
+    return true
+  }, [promptPack.finalPrompt])
+
+  const generateWithWebProvider = useCallback(async () => {
+    const copied = await copyPromptForProvider()
+    if (!copied) return
+    const opened = await openProviderWorkspace(workflow.provider)
+    if (!opened) return
+    setNotice('Prompt copied and workspace opened.')
+  }, [copyPromptForProvider, openProviderWorkspace, workflow.provider])
 
   const attachTemplate = useCallback(async () => {
     setBusy('template')
@@ -304,15 +488,6 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
     await window.api.configSet('replicateApiToken', replicateToken.trim())
     setNotice('Replicate token saved.')
   }, [replicateToken])
-
-  const copyPrompt = useCallback(async () => {
-    const result = await window.api.copyText(promptPack.finalPrompt)
-    if (!result?.success) {
-      setNotice(result?.error || 'Could not copy prompt.')
-      return
-    }
-    setNotice('Prompt copied.')
-  }, [promptPack.finalPrompt])
 
   const exportPromptPack = useCallback(async () => {
     const filePath = await window.api.saveFile({
@@ -393,6 +568,21 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
     setNotice('Classic clothing texture generated.')
   }, [promptPack.finalPrompt, replicateToken, updateWorkflow, workflow.designPrompt, workflow.seed, workflow.templateDataUrl, workflow.templateImagePath])
 
+  const selectedProvider = PROVIDERS[workflow.provider] || PROVIDERS.replicate
+  const currentProviderStatus =
+    providerSessionState[workflow.provider] || DEFAULT_PROVIDER_SESSION_STATE.manus
+  const providerStatusLabel = currentProviderStatus.loading
+    ? 'Checking...'
+    : currentProviderStatus.connected
+      ? 'Connected'
+      : currentProviderStatus.loginDetected
+        ? 'Login required'
+        : currentProviderStatus.checked
+          ? 'Not connected'
+          : 'Not checked'
+
+  const handleGenerate = workflow.provider === 'replicate' ? generateTexture : generateWithWebProvider
+
   return (
     <div style={styles.page}>
       <div style={styles.header}>
@@ -408,18 +598,66 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
           <div>
             <h1 style={styles.title}>Classic Clothing Studio</h1>
             <p style={styles.subtitle}>
-              Generate Roblox classic clothing by filling the Roblox UV template panels with hosted
-              FLUX on Replicate. The built-in shirt template is ready inside the app.
+              Generate Roblox classic clothing by filling the Roblox UV template panels.
+              Choose a generation provider below.
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button style={styles.button} onClick={() => window.api.openExternalUrl(REPLICATE_URL)}>
-              Open Replicate
-            </button>
-            <button style={styles.primaryButton} onClick={exportPromptPack}>
+            <button style={styles.button} onClick={exportPromptPack}>
               Export Prompt Pack
             </button>
+            <button style={styles.primaryButton} onClick={handleGenerate} disabled={busy === 'generate'}>
+              {busy === 'generate' ? 'Generating…' : selectedProvider.generateLabel}
+            </button>
           </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: 10,
+            marginBottom: 10
+          }}
+        >
+          {Object.entries(PROVIDERS).map(([id, provider]) => {
+            const active = workflow.provider === id
+            const status = id !== 'replicate' ? providerSessionState[id] : null
+            return (
+              <button
+                key={id}
+                onClick={() => updateWorkflow({ provider: id })}
+                style={{
+                  ...styles.card,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  border: active ? `1px solid ${provider.accent}` : '1px solid #202533'
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 8
+                  }}
+                >
+                  <strong style={{ color: '#eef0f6', fontSize: 14 }}>{provider.label}</strong>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: status?.connected ? '#4ade80' : '#6b7280',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em'
+                    }}
+                  >
+                    {status ? (status.connected ? 'Connected' : 'Not connected') : 'API'}
+                  </span>
+                </div>
+              </button>
+            )
+          })}
         </div>
 
         {notice && (
@@ -469,24 +707,90 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
 
       <div style={styles.body}>
         <div style={styles.rail}>
-          <div style={{ ...styles.card, marginBottom: 14 }}>
-            <label style={styles.label}>Replicate API Token</label>
-            <input
-              value={replicateToken}
-              onChange={(event) => setReplicateToken(event.target.value)}
-              placeholder="r8_..."
-              type="password"
-              style={styles.input}
-            />
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button style={styles.primaryButton} onClick={saveToken}>
-                Save Token
-              </button>
-              <button style={styles.button} onClick={() => window.api.openExternalUrl('https://replicate.com/account/api-tokens')}>
-                Get Token
-              </button>
+          {workflow.provider === 'replicate' && (
+            <div style={{ ...styles.card, marginBottom: 14 }}>
+              <label style={styles.label}>Replicate API Token</label>
+              <input
+                value={replicateToken}
+                onChange={(event) => setReplicateToken(event.target.value)}
+                placeholder="r8_..."
+                type="password"
+                style={styles.input}
+              />
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button style={styles.primaryButton} onClick={saveToken}>
+                  Save Token
+                </button>
+                <button style={styles.button} onClick={() => window.api.openExternalUrl('https://replicate.com/account/api-tokens')}>
+                  Get Token
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+
+          {workflow.provider !== 'replicate' && (
+            <div style={{ ...styles.card, marginBottom: 14 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 10
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 11, color: '#7c8499', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    Browser session
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: selectedProvider.accent, marginTop: 8 }}>
+                    {selectedProvider.label}
+                  </div>
+                </div>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: currentProviderStatus.connected
+                      ? '#4ade80'
+                      : currentProviderStatus.loginDetected
+                        ? '#f59e0b'
+                        : '#94a3b8',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}
+                >
+                  {providerStatusLabel}
+                </span>
+              </div>
+              {currentProviderStatus.error && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: '8px 10px',
+                    borderRadius: 10,
+                    background: 'rgba(248,113,113,0.08)',
+                    border: '1px solid rgba(248,113,113,0.18)',
+                    color: '#fca5a5',
+                    fontSize: 11,
+                    lineHeight: 1.6
+                  }}
+                >
+                  {currentProviderStatus.error}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+                <button style={styles.button} onClick={() => openProviderLogin(workflow.provider)}>
+                  Connect
+                </button>
+                <button style={styles.button} onClick={() => openProviderWorkspace(workflow.provider)}>
+                  Workspace
+                </button>
+                <button style={styles.button} onClick={() => refreshProviderStatus(workflow.provider)}>
+                  Refresh
+                </button>
+              </div>
+            </div>
+          )}
 
           <div style={{ ...styles.card, marginBottom: 14 }}>
             <label style={styles.label}>Asset Type</label>
@@ -584,29 +888,31 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
                   style={styles.input}
                 />
               </div>
-              <div>
-                <label style={styles.label}>Seed</label>
-                <input
-                  value={workflow.seed}
-                  onChange={(event) => updateWorkflow({ seed: event.target.value })}
-                  placeholder="optional"
-                  style={styles.input}
-                />
-              </div>
+              {workflow.provider === 'replicate' && (
+                <div>
+                  <label style={styles.label}>Seed</label>
+                  <input
+                    value={workflow.seed}
+                    onChange={(event) => updateWorkflow({ seed: event.target.value })}
+                    placeholder="optional"
+                    style={styles.input}
+                  />
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
               <button
                 style={styles.primaryButton}
-                onClick={generateTexture}
+                onClick={handleGenerate}
                 disabled={busy === 'generate'}
               >
-                {busy === 'generate' ? 'Generating…' : 'Generate with Replicate FLUX'}
+                {busy === 'generate' ? 'Generating…' : selectedProvider.generateLabel}
               </button>
-              <button style={styles.button} onClick={copyPrompt}>
+              <button style={styles.button} onClick={copyPromptForProvider}>
                 Copy Prompt
               </button>
-              {workflow.resultPath && (
+              {workflow.resultPath && workflow.provider === 'replicate' && (
                 <button style={styles.button} onClick={saveGeneratedTexture}>
                   Save PNG
                 </button>
@@ -653,6 +959,35 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
 
         <div style={styles.pack}>
           <div style={{ ...styles.card, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: '#7c8499', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+              Final Prompt
+            </div>
+            <textarea
+              readOnly
+              rows={14}
+              style={{ ...styles.textarea, color: '#d5d9e5' }}
+              value={promptPack.finalPrompt || 'Fill in the design prompt to build a prompt.'}
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              <button style={styles.button} onClick={copyPromptForProvider}>
+                Copy Prompt
+              </button>
+              <button style={styles.button} onClick={exportPromptPack}>
+                Export Pack
+              </button>
+            </div>
+          </div>
+
+          <div style={{ ...styles.card, marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 8 }}>
+              Negative Constraints
+            </div>
+            <div style={{ fontSize: 12, color: '#9aa0b0', lineHeight: 1.7 }}>
+              {promptPack.negativePrompt}
+            </div>
+          </div>
+
+          <div style={styles.card}>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 8 }}>
               Hosted Workflow
             </div>
@@ -667,33 +1002,6 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
               }}
             >
               {promptPack.workflowNotes}
-            </pre>
-          </div>
-
-          <div style={{ ...styles.card, marginBottom: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 8 }}>
-              Negative Constraints
-            </div>
-            <div style={{ fontSize: 12, color: '#9aa0b0', lineHeight: 1.7 }}>
-              {promptPack.negativePrompt}
-            </div>
-          </div>
-
-          <div style={styles.card}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 8 }}>
-              Final Prompt
-            </div>
-            <pre
-              style={{
-                margin: 0,
-                whiteSpace: 'pre-wrap',
-                fontFamily: 'inherit',
-                fontSize: 12,
-                lineHeight: 1.7,
-                color: '#9aa0b0'
-              }}
-            >
-              {promptPack.finalPrompt}
             </pre>
           </div>
         </div>
