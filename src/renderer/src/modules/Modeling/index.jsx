@@ -321,7 +321,7 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
   )
 
   const optimizePart = useCallback(
-    async (id) => {
+    async (id, ratio = 0.5) => {
       const setter = tab === 'character' ? setCharParts : setEnvParts
       setter((prev) =>
         prev.map((p) => (p.id === id ? { ...p, optimizeState: 'optimizing', optimizeError: null } : p))
@@ -337,7 +337,7 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
         )
         return
       }
-      const res = await window.api.optimizeMesh({ inputPath: part.outputPath })
+      const res = await window.api.optimizeMesh({ inputPath: part.outputPath, ratio })
       if (!res.success) {
         setter((prev) =>
           prev.map((p) => (p.id === id ? { ...p, optimizeState: 'error', optimizeError: res.error } : p))

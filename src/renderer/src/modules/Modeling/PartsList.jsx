@@ -1,6 +1,13 @@
 /* eslint-disable react/prop-types */
 import { useState } from 'react'
 
+const OPTIMIZE_PRESETS = [
+  { label: 'Light',  ratio: 0.75, desc: '75% — minimal reduction, best quality' },
+  { label: 'Medium', ratio: 0.50, desc: '50% — balanced quality/performance' },
+  { label: 'Heavy',  ratio: 0.25, desc: '25% — aggressive reduction, game-ready' },
+  { label: 'Ultra',  ratio: 0.10, desc: '10% — maximum reduction, lowest poly' },
+]
+
 const ATTACH_POINTS = [
   // Head
   { id: 'HatAttachment',       label: '🎩 Hat (Top of Head)' },
@@ -337,7 +344,7 @@ export default function PartsList({
               onDuplicate={() => onDuplicate?.(part.id)}
               onGenerate={() => onGenerate(part.id)}
               onPartChange={(ch) => onPartChange(part.id, ch)}
-              onOptimize={() => onOptimize?.(part.id)}
+              onOptimize={(ratio) => onOptimize?.(part.id, ratio)}
               showAttachPoint={showAttachPoint}
             />
           ))
@@ -413,6 +420,7 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
   const [focusName, setFocusName] = useState(false)
   const [imageMode, setImageMode] = useState(Boolean(part.imagePath))
   const [multiviewMode, setMultiviewMode] = useState(Boolean(part.multiviewImages?.some(Boolean)))
+  const [optimizePresetIdx, setOptimizePresetIdx] = useState(1)
 
   const MULTIVIEW_SLOTS = ['Front', 'Back', 'Left', 'Right']
 
@@ -736,38 +744,61 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
           {busy ? <><SmallSpinIcon />Generating…</> : part.status === 'done' ? '↺ Regenerate' : '⚡ Generate Part'}
         </button>
         {part.status === 'done' && part.outputPath && (
-          <button
-            onClick={onOptimize}
-            disabled={part.optimizeState === 'optimizing'}
-            title="Simplify mesh geometry to reduce polygon count and file size"
-            style={{
-              padding: '9px 11px',
-              borderRadius: 8,
-              fontSize: 11,
-              fontWeight: 700,
-              background: part.optimizeState === 'done' ? 'rgba(74,222,128,0.1)'
-                : part.optimizeState === 'error' ? 'rgba(248,113,113,0.08)'
-                : part.optimizeState === 'optimizing' ? 'rgba(245,158,11,0.08)'
-                : '#12151d',
-              color: part.optimizeState === 'done' ? '#4ade80'
-                : part.optimizeState === 'error' ? '#fca5a5'
-                : part.optimizeState === 'optimizing' ? '#f59e0b'
-                : '#7c8499',
-              border: part.optimizeState === 'done' ? '1px solid rgba(74,222,128,0.2)'
-                : part.optimizeState === 'error' ? '1px solid rgba(248,113,113,0.2)'
-                : part.optimizeState === 'optimizing' ? '1px solid rgba(245,158,11,0.2)'
-                : '1px solid #1e2330',
-              cursor: part.optimizeState === 'optimizing' ? 'wait' : 'pointer',
-              whiteSpace: 'nowrap',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4
-            }}
-          >
-            {part.optimizeState === 'optimizing' ? <><SmallSpinIcon />Optimizing…</>
-              : part.optimizeState === 'done' ? `✓ -${part.optimizeSaved ?? 0}%`
-              : '✦ Optimize'}
-          </button>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
+            <select
+              disabled={part.optimizeState === 'optimizing'}
+              value={optimizePresetIdx}
+              onChange={(e) => setOptimizePresetIdx(Number(e.target.value))}
+              title={OPTIMIZE_PRESETS[optimizePresetIdx].desc}
+              style={{
+                padding: '4px 6px',
+                borderRadius: 8,
+                fontSize: 11,
+                fontWeight: 600,
+                background: '#12151d',
+                color: '#7c8499',
+                border: '1px solid #1e2330',
+                cursor: part.optimizeState === 'optimizing' ? 'wait' : 'pointer',
+                outline: 'none',
+              }}
+            >
+              {OPTIMIZE_PRESETS.map((p, i) => (
+                <option key={p.label} value={i}>{p.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => onOptimize?.(OPTIMIZE_PRESETS[optimizePresetIdx].ratio)}
+              disabled={part.optimizeState === 'optimizing'}
+              title={OPTIMIZE_PRESETS[optimizePresetIdx].desc}
+              style={{
+                padding: '9px 11px',
+                borderRadius: 8,
+                fontSize: 11,
+                fontWeight: 700,
+                background: part.optimizeState === 'done' ? 'rgba(74,222,128,0.1)'
+                  : part.optimizeState === 'error' ? 'rgba(248,113,113,0.08)'
+                  : part.optimizeState === 'optimizing' ? 'rgba(245,158,11,0.08)'
+                  : '#12151d',
+                color: part.optimizeState === 'done' ? '#4ade80'
+                  : part.optimizeState === 'error' ? '#fca5a5'
+                  : part.optimizeState === 'optimizing' ? '#f59e0b'
+                  : '#7c8499',
+                border: part.optimizeState === 'done' ? '1px solid rgba(74,222,128,0.2)'
+                  : part.optimizeState === 'error' ? '1px solid rgba(248,113,113,0.2)'
+                  : part.optimizeState === 'optimizing' ? '1px solid rgba(245,158,11,0.2)'
+                  : '1px solid #1e2330',
+                cursor: part.optimizeState === 'optimizing' ? 'wait' : 'pointer',
+                whiteSpace: 'nowrap',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+            >
+              {part.optimizeState === 'optimizing' ? <><SmallSpinIcon />Optimizing…</>
+                : part.optimizeState === 'done' ? `✓ -${part.optimizeSaved ?? 0}%`
+                : '✦ Optimize'}
+            </button>
+          </div>
         )}
       </div>
       {part.optimizeState === 'error' && part.optimizeError && (
