@@ -44,6 +44,7 @@ const api = {
 
   // Hosted image generation
   replicateGenerateClothing: (opts) => ipcRenderer.invoke('replicate:generateClothing', opts),
+  clothingGenerateGptImage: (opts) => ipcRenderer.invoke('clothing:generateGptImage', opts),
 
   // Modeling pipeline
   openImage: () => ipcRenderer.invoke('dialog:openImage'),

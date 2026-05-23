@@ -26,6 +26,11 @@ const PROVIDERS = {
     accent: '#a78bfa',
     generateLabel: 'Generate with Replicate'
   },
+  'gpt-image': {
+    label: 'GPT Image 2',
+    accent: '#f97316',
+    generateLabel: 'Generate with GPT Image 2'
+  },
   manus: {
     label: 'Manus',
     accent: '#60a5fa',
@@ -243,6 +248,7 @@ const styles = {
 export default function ClothingModule({ workflowState, setWorkflowState }) {
   const [workflow, setWorkflow] = useState(() => ({ ...DEFAULT_WORKFLOW, ...(workflowState?.clothingWorkflow || {}) }))
   const [replicateToken, setReplicateToken] = useState('')
+  const [azureGithubToken, setAzureGithubToken] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState('')
   const [progress, setProgress] = useState(null)
@@ -285,6 +291,9 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
   useEffect(() => {
     window.api.configGet('replicateApiToken').then((value) => {
       if (value) setReplicateToken(value)
+    })
+    window.api.configGet('githubAzureToken').then((value) => {
+      if (value) setAzureGithubToken(value)
     })
   }, [])
 
@@ -477,6 +486,53 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
     setNotice('Replicate token saved.')
   }, [replicateToken])
 
+  const saveAzureToken = useCallback(async () => {
+    await window.api.configSet('githubAzureToken', azureGithubToken.trim())
+    setNotice('GitHub / Azure token saved.')
+  }, [azureGithubToken])
+
+  const generateWithGptImage = useCallback(async () => {
+    if (!azureGithubToken.trim()) {
+      setNotice('Add your GitHub / Azure API token first.')
+      return
+    }
+    if (!workflow.templateImagePath) {
+      setNotice('Attach a Roblox clothing template image first.')
+      return
+    }
+    if (!workflow.designPrompt.trim()) {
+      setNotice('Describe the clothing design first.')
+      return
+    }
+
+    setBusy('generate')
+    setProgress({ step: 'Preparing GPT Image request…', pct: 5 })
+
+    const result = await window.api.clothingGenerateGptImage({
+      apiToken: azureGithubToken.trim(),
+      prompt: promptPack.finalPrompt,
+      inputImagePath: workflow.templateImagePath !== 'Built-in Roblox shirt template' ? workflow.templateImagePath : null,
+      inputImageDataUrl: workflow.templateDataUrl
+    })
+
+    setBusy('')
+
+    if (!result?.success) {
+      setProgress(null)
+      setNotice(result?.error || 'GPT Image generation failed.')
+      return
+    }
+
+    const dataUrlResult = await window.api.readFileAsDataURL({ filePath: result.outputPath })
+    setProgress(null)
+    updateWorkflow({
+      resultPath: result.outputPath,
+      resultDataUrl: dataUrlResult.success ? dataUrlResult.dataUrl : null,
+      lastPrompt: promptPack.finalPrompt
+    })
+    setNotice('Classic clothing texture generated.')
+  }, [azureGithubToken, promptPack.finalPrompt, updateWorkflow, workflow.designPrompt, workflow.templateDataUrl, workflow.templateImagePath])
+
   const exportPromptPack = useCallback(async () => {
     const filePath = await window.api.saveFile({
       title: 'Export Clothing Prompt Pack',
@@ -569,7 +625,12 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
           ? 'Not connected'
           : 'Not checked'
 
-  const handleGenerate = workflow.provider === 'replicate' ? generateTexture : generateWithWebProvider
+  const handleGenerate =
+    workflow.provider === 'replicate'
+      ? generateTexture
+      : workflow.provider === 'gpt-image'
+        ? generateWithGptImage
+        : generateWithWebProvider
 
   return (
     <div style={styles.page}>
@@ -716,7 +777,35 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
             </div>
           )}
 
-          {workflow.provider !== 'replicate' && (
+          {workflow.provider === 'gpt-image' && (
+            <div style={{ ...styles.card, marginBottom: 14 }}>
+              <label style={styles.label}>GitHub / Azure API Token</label>
+              <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.6, marginBottom: 10 }}>
+                Uses GPT Image 2 (<code style={{ color: '#f97316' }}>gpt-image-1</code>) via GitHub
+                Models or Azure AI. Paste your GitHub Personal Access Token or Azure API key.
+              </div>
+              <input
+                value={azureGithubToken}
+                onChange={(e) => setAzureGithubToken(e.target.value)}
+                placeholder="github_pat_... or Azure key"
+                type="password"
+                style={styles.input}
+              />
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button style={styles.primaryButton} onClick={saveAzureToken}>
+                  Save Token
+                </button>
+                <button
+                  style={styles.button}
+                  onClick={() => window.api.openExternalUrl('https://github.com/settings/tokens')}
+                >
+                  GitHub PAT
+                </button>
+              </div>
+            </div>
+          )}
+
+          {workflow.provider !== 'replicate' && workflow.provider !== 'gpt-image' && (
             <div style={{ ...styles.card, marginBottom: 14 }}>
               <div
                 style={{

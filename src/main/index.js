@@ -1816,6 +1816,90 @@ ipcMain.handle(
   }
 )
 
+// ── IPC: GPT Image 2 clothing generation (Azure / GitHub Models) ──────────
+
+ipcMain.handle(
+  'clothing:generateGptImage',
+  async (event, { apiToken, prompt, inputImagePath, inputImageDataUrl } = {}) => {
+    try {
+      if (!apiToken?.trim()) {
+        return { success: false, error: 'GitHub / Azure API token required.' }
+      }
+      if (!prompt?.trim()) {
+        return { success: false, error: 'A clothing prompt is required.' }
+      }
+
+      // Resolve image bytes from either a data URL or a file path
+      let imageBuffer
+      if (inputImageDataUrl?.trim()) {
+        const base64Data = inputImageDataUrl.trim().replace(/^data:[^;]+;base64,/, '')
+        imageBuffer = Buffer.from(base64Data, 'base64')
+      } else if (inputImagePath?.trim() && existsSync(inputImagePath)) {
+        imageBuffer = readFileSync(inputImagePath)
+      } else {
+        return { success: false, error: 'Attach a Roblox clothing template image first.' }
+      }
+
+      event.sender.send('clothing:progress', { step: 'Sending template to GPT Image…', pct: 15 })
+
+      const outDir = join(app.getPath('temp'), 'ai-game-dev-hub')
+      if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
+
+      // Build multipart/form-data body using FormData + Blob (Node 18+)
+      const form = new FormData()
+      form.append('model', 'gpt-image-1')
+      form.append('prompt', prompt.trim())
+      form.append('n', '1')
+      form.append('size', '1024x1024')
+      // Append image as a Blob so fetch sends it with the correct content-type
+      const imageBlob = new Blob([imageBuffer], { type: 'image/png' })
+      form.append('image', imageBlob, 'template.png')
+
+      event.sender.send('clothing:progress', { step: 'Generating clothing texture…', pct: 30 })
+
+      const response = await fetch('https://models.inference.ai.azure.com/images/edits', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiToken.trim()}`
+          // Do NOT set Content-Type; fetch sets it automatically for FormData
+        },
+        body: form
+      })
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '')
+        let errMsg
+        try {
+          const parsed = JSON.parse(errText)
+          errMsg = parsed?.error?.message || parsed?.message || errText
+        } catch {
+          errMsg = errText
+        }
+        return {
+          success: false,
+          error: `GPT Image API error ${response.status}: ${errMsg.slice(0, 280)}`
+        }
+      }
+
+      event.sender.send('clothing:progress', { step: 'Downloading generated texture…', pct: 88 })
+
+      const json = await response.json()
+      const b64 = json?.data?.[0]?.b64_json
+      if (!b64) {
+        return { success: false, error: 'GPT Image returned no image data.' }
+      }
+
+      const outputPath = join(outDir, `classic_clothing_gpt_${Date.now()}.png`)
+      writeFileSync(outputPath, Buffer.from(b64, 'base64'))
+
+      event.sender.send('clothing:progress', { step: 'Classic clothing texture ready!', pct: 100 })
+      return { success: true, outputPath, provider: 'gpt-image' }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  }
+)
+
 // ── IPC: Tripo Website Session Wrapper ──────────────────────────────────────
 
 ipcMain.handle('tripo:webOpenLogin', async (_, { baseUrl } = {}) => {
