@@ -436,8 +436,13 @@ async function navigateToTripoGenerateSurface(win, baseUrl, generateUrl) {
 
 function getTripoHistoryUrlCandidates(baseUrl, generateUrl) {
   const normalizedBaseUrl = normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL).replace(/\/$/, '')
+  const lastHistoryUrl = normalizeExternalUrl(
+    loadConfig().tripoWebLastHistoryUrl,
+    DEFAULT_TRIPO_WEB_BASE_URL
+  ).replace(/\/$/, '')
   return Array.from(
     new Set([
+      lastHistoryUrl,
       `${normalizedBaseUrl}/history`,
       `${normalizedBaseUrl}/app/history`,
       `${normalizedBaseUrl}/my-creations`,
@@ -450,8 +455,20 @@ function getTripoHistoryUrlCandidates(baseUrl, generateUrl) {
       normalizeExternalUrl(generateUrl, DEFAULT_TRIPO_WEB_GENERATE_URL),
       `${normalizedBaseUrl}/app`,
       normalizedBaseUrl
-    ])
+    ].filter(Boolean))
   )
+}
+
+async function waitForTripoHistoryItems(win, timeoutMs = 2500) {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const scraped = await scrapeTripoHistoryItems(win)
+    if (scraped.items?.length) return scraped
+    await wait(250)
+  }
+
+  return scrapeTripoHistoryItems(win)
 }
 
 async function scrapeTripoHistoryItems(win) {
@@ -598,17 +615,16 @@ async function listTripoHistoryItems(baseUrl, generateUrl) {
 
     for (const url of candidates) {
       await win.loadURL(url)
-      await wait(2500)
 
-      for (let pass = 0; pass < 3; pass++) {
-        const scraped = await scrapeTripoHistoryItems(win)
+      for (let pass = 0; pass < 2; pass++) {
+        const scraped = await waitForTripoHistoryItems(win, pass === 0 ? 2000 : 1500)
         if (scraped.items?.length) {
+          saveConfig({ ...loadConfig(), tripoWebLastHistoryUrl: scraped.url })
           return { success: true, items: scraped.items, sourceUrl: scraped.url, title: scraped.title }
         }
 
         const nav = await clickTripoHistoryNavigation(win)
         if (!nav.clicked) break
-        await wait(2500)
       }
     }
 

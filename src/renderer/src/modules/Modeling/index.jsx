@@ -102,10 +102,6 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
     )
   }, [tripoOpts.webBaseUrl, tripoOpts.webGenerateUrl])
 
-  useEffect(() => {
-    syncTripoHistory()
-  }, [syncTripoHistory])
-
   const parts = tab === 'character' ? charParts : envParts
   const setParts = tab === 'character' ? setCharParts : setEnvParts
 
@@ -276,13 +272,19 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
   const accessories = charParts.filter((part) => part.status === 'done' && part.dataUrl)
   const historyBrowserAssets = useMemo(() => {
     const merged = new Map()
+    for (const asset of workspaceAssets) {
+      if (!String(asset.provider || '').startsWith('tripo')) continue
+      const key = asset.outputPath || asset.filePath || asset.id
+      if (!key || merged.has(key)) continue
+      merged.set(key, asset)
+    }
     for (const asset of historyAssets) {
       const key = asset.detailUrl || asset.downloadUrl || asset.id
       if (!key || merged.has(key)) continue
       merged.set(key, asset)
     }
     return [...merged.values()]
-  }, [historyAssets])
+  }, [historyAssets, workspaceAssets])
 
   const addGeneratedAssetToCurrentTab = useCallback(
     async (asset) => {
@@ -347,7 +349,22 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
         }
       }
 
-      if (!dataUrl) return
+      if (!dataUrl) {
+        targetSetter((prev) => [
+          ...prev,
+          mkPart({
+            name: asset.name || defaultName,
+            prompt: asset.prompt || '',
+            status: 'error',
+            outputPath: resolvedOutputPath,
+            dataUrl: null,
+            provider: asset.provider || 'workspace',
+            ...(attachPoint ? { attachPoint } : {}),
+            error: 'Could not load the selected Tripo model.'
+          })
+        ])
+        return
+      }
 
       targetSetter((prev) => [
         ...prev,
