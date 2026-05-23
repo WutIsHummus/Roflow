@@ -36,11 +36,12 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
     webBaseUrl: 'https://www.tripo3d.ai/',
     webGenerateUrl: 'https://www.tripo3d.ai/',
     showBrowserAutomation: true,
-    modelVersion: 'v2.5-20250123',
+    modelVersion: 'v3.0-20250421',
     texture: true,
     pbr: true,
     smartLowPoly: false,
-    style: null
+    style: null,
+    downloadFormat: 'glb'
   })
   const [globalProgress, setGlobalProgress] = useState(null)
   const [workspaceAssets, setWorkspaceAssets] = useState([])
@@ -48,6 +49,11 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
   const [historyState, setHistoryState] = useState('idle')
   const [historyMessage, setHistoryMessage] = useState('')
   const [recentlyRemoved, setRecentlyRemoved] = useState(null)
+  const [showAiFill, setShowAiFill] = useState(false)
+  const [aiFillDesc, setAiFillDesc] = useState('')
+  const [aiFillStyle, setAiFillStyle] = useState('Generic')
+  const [aiFillBusy, setAiFillBusy] = useState(false)
+  const [aiFillError, setAiFillError] = useState('')
 
   useEffect(() => {
     if (window.api.onModelingProgress) {
@@ -166,6 +172,62 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
     setRecentlyRemoved(null)
   }, [recentlyRemoved])
 
+  const importMeshAsPart = useCallback(async () => {
+    if (!window.api?.openMesh) return
+    const filePath = await window.api.openMesh()
+    if (!filePath) return
+
+    const dataUrlRes = await window.api.readFileAsDataURL({ filePath })
+    const targetSetter = tab === 'character' ? setCharParts : setEnvParts
+    const ext = filePath.split('.').pop().toLowerCase()
+    const fileName = filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '')
+    const attachPoint = tab === 'character' ? 'HatAttachment' : undefined
+
+    targetSetter((prev) => [
+      ...prev,
+      mkPart({
+        name: fileName,
+        prompt: '',
+        status: dataUrlRes.success ? 'done' : 'error',
+        outputPath: filePath,
+        dataUrl: dataUrlRes.success ? dataUrlRes.dataUrl : null,
+        provider: `imported-${ext}`,
+        ...(attachPoint ? { attachPoint } : {}),
+        error: dataUrlRes.success ? null : dataUrlRes.error || 'Could not read mesh file.'
+      })
+    ])
+  }, [tab])
+
+  const aiFillEnvironment = useCallback(async () => {
+    if (!aiFillDesc.trim()) { setAiFillError('Enter a scene description first.'); return }
+    const apiKey = await window.api.configGet('deepseekApiKey')
+    if (!apiKey) { setAiFillError('Add a DeepSeek API key in Building Generator first.'); return }
+    setAiFillError('')
+    setAiFillBusy(true)
+    const result = await window.api.buildingGenerateRecipe({
+      description: aiFillDesc.trim(),
+      style: aiFillStyle,
+      gameType: 'RPG',
+      apiKey
+    })
+    setAiFillBusy(false)
+    if (!result?.success) { setAiFillError(result?.error || 'AI generation failed.'); return }
+    const components = result.recipe?.components || []
+    setEnvParts((prev) => [
+      ...prev,
+      ...components.map((comp) =>
+        mkPart({
+          name: comp.name || 'Environment Part',
+          prompt: comp.tripoPrompt || comp.name || '',
+          status: 'pending',
+          provider: null
+        })
+      )
+    ])
+    setAiFillDesc('')
+    setShowAiFill(false)
+  }, [aiFillDesc, aiFillStyle])
+
   const generatePart = useCallback(
     async (id) => {
       const setter = tab === 'character' ? setCharParts : setEnvParts
@@ -190,10 +252,12 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
         const res = await window.api.tripoWebGenerate({
           prompt: part.prompt.trim(),
           imagePath: part.imagePath || '',
+          multiviewImages: part.multiviewImages || [],
           baseUrl: tripoOpts.webBaseUrl,
           generateUrl: tripoOpts.webGenerateUrl,
           showBrowser: tripoOpts.showBrowserAutomation,
-          keepWindowOpen: tripoOpts.showBrowserAutomation
+          keepWindowOpen: tripoOpts.showBrowserAutomation,
+          downloadFormat: tripoOpts.downloadFormat || 'glb'
         })
 
         setGlobalProgress(null)
@@ -254,6 +318,91 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
       }
     },
     [loadWorkspaceAssets, tab, tripoOpts]
+  )
+
+  const optimizePart = useCallback(
+    async (id, ratio = 0.5) => {
+      const setter = tab === 'character' ? setCharParts : setEnvParts
+      setter((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, optimizeState: 'optimizing', optimizeError: null } : p))
+      )
+      const part = (() => {
+        let found = null
+        setter((prev) => { found = prev.find((p) => p.id === id); return prev })
+        return found
+      })()
+      if (!part?.outputPath) {
+        setter((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, optimizeState: 'error', optimizeError: 'No output file to optimize.' } : p))
+        )
+        return
+      }
+      const res = await window.api.optimizeMesh({ inputPath: part.outputPath, ratio })
+      if (!res.success) {
+        setter((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, optimizeState: 'error', optimizeError: res.error } : p))
+        )
+        return
+      }
+      const dataUrlRes = await window.api.readFileAsDataURL({ filePath: res.outputPath })
+      setter((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                outputPath: res.outputPath,
+                dataUrl: dataUrlRes.success ? dataUrlRes.dataUrl : p.dataUrl,
+                optimizeState: 'done',
+                optimizeSaved: res.saved,
+                optimizeError: null
+              }
+            : p
+        )
+      )
+    },
+    [tab]
+  )
+
+  const retopoPart = useCallback(
+    async (id, targetFaces = 2000) => {
+      const setter = tab === 'character' ? setCharParts : setEnvParts
+      setter((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, retopoState: 'retopoing', retopoError: null } : p))
+      )
+      const part = (() => {
+        let found = null
+        setter((prev) => { found = prev.find((p) => p.id === id); return prev })
+        return found
+      })()
+      if (!part?.outputPath) {
+        setter((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, retopoState: 'error', retopoError: 'No output file to retopologize.' } : p))
+        )
+        return
+      }
+      const res = await window.api.retopologyMesh({ inputPath: part.outputPath, targetFaces })
+      if (!res.success) {
+        setter((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, retopoState: 'error', retopoError: res.error } : p))
+        )
+        return
+      }
+      const dataUrlRes = await window.api.readFileAsDataURL({ filePath: res.outputPath })
+      setter((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                outputPath: res.outputPath,
+                dataUrl: dataUrlRes.success ? dataUrlRes.dataUrl : p.dataUrl,
+                retopoState: 'done',
+                retopoError: null
+              }
+            : p
+        )
+      )
+    },
+    [tab]
   )
 
   const exportScene = useCallback(async () => {
@@ -501,7 +650,110 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
               {section.label}
             </button>
           ))}
+          {tab === 'environment' && (
+            <button
+              onClick={() => setShowAiFill((v) => !v)}
+              style={{
+                marginLeft: 'auto',
+                padding: '6px 12px',
+                fontSize: 11,
+                fontWeight: 700,
+                background: showAiFill ? 'rgba(124,58,237,0.2)' : '#12151d',
+                border: showAiFill ? '1px solid rgba(124,58,237,0.45)' : '1px solid #252a36',
+                borderRadius: 8,
+                cursor: 'pointer',
+                color: showAiFill ? '#c4b5fd' : '#7c8499',
+                alignSelf: 'center',
+                marginBottom: 2
+              }}
+            >
+              ✨ AI Auto-fill Scene
+            </button>
+          )}
         </div>
+
+        {tab === 'environment' && showAiFill && (
+          <div
+            style={{
+              background: '#111318',
+              border: '1px solid rgba(124,58,237,0.22)',
+              borderRadius: 10,
+              padding: '14px 16px',
+              marginBottom: 2,
+              display: 'grid',
+              gap: 10
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#c4b5fd' }}>
+              Auto-fill Environment from AI
+            </div>
+            <div style={{ fontSize: 11, color: '#555b6e', lineHeight: 1.6 }}>
+              Describe your scene — DeepSeek breaks it into components and adds them to the parts list with optimised Tripo prompts ready to generate.
+            </div>
+            <textarea
+              value={aiFillDesc}
+              onChange={(e) => setAiFillDesc(e.target.value)}
+              placeholder="e.g. A medieval market square with a stone fountain, merchant stalls, and a wooden inn"
+              rows={2}
+              style={{
+                width: '100%',
+                background: '#0d0f14',
+                border: '1px solid #252a36',
+                borderRadius: 8,
+                padding: '9px 11px',
+                fontSize: 12,
+                color: '#c4cad8',
+                resize: 'vertical',
+                outline: 'none',
+                fontFamily: 'inherit',
+                lineHeight: 1.6,
+                boxSizing: 'border-box'
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select
+                value={aiFillStyle}
+                onChange={(e) => setAiFillStyle(e.target.value)}
+                style={{
+                  background: '#0d0f14',
+                  border: '1px solid #252a36',
+                  borderRadius: 7,
+                  padding: '6px 10px',
+                  fontSize: 11,
+                  color: '#9499a8',
+                  cursor: 'pointer',
+                  outline: 'none'
+                }}
+              >
+                {['Generic', 'Medieval', 'Sci-Fi', 'Modern', 'Fantasy', 'Japanese', 'Western', 'Cyberpunk'].map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              <button
+                onClick={aiFillEnvironment}
+                disabled={aiFillBusy}
+                style={{
+                  background: 'linear-gradient(135deg,#7c3aed,#a78bfa)',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '8px 14px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: '#fff',
+                  cursor: aiFillBusy ? 'wait' : 'pointer',
+                  opacity: aiFillBusy ? 0.6 : 1
+                }}
+              >
+                {aiFillBusy ? 'Generating…' : 'Generate Components'}
+              </button>
+            </div>
+            {aiFillError && (
+              <div style={{ fontSize: 11, color: '#fca5a5', background: 'rgba(248,113,113,0.08)', borderRadius: 6, padding: '7px 10px' }}>
+                {aiFillError}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -523,6 +775,9 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
             onDuplicate={duplicatePart}
             onGenerate={generatePart}
             onPartChange={updatePart}
+            onImportMesh={importMeshAsPart}
+            onOptimize={optimizePart}
+            onRetopo={retopoPart}
             showAttachPoint={tab === 'character'}
             tripoAssets={historyBrowserAssets}
             onAddTripoAsset={addGeneratedAssetToCurrentTab}

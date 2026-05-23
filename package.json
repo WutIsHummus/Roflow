@@ -20,8 +20,11 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0",
     "@gradio/client": "^2.2.0",
     "lucide-react": "^1.16.0",
+    "meshoptimizer": "^1.1.1",
     "react-router-dom": "^7.15.1",
     "three": "^0.184.0"
   },

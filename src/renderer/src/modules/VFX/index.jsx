@@ -5,38 +5,6 @@ import VfxPreview3D from './VfxPreview3D'
 let nextReferenceId = 1
 let nextLayerId = 1
 
-const SOURCE_MODES = [
-  { id: 'hybrid', label: 'Unreal + Ground Up' },
-  { id: 'unreal-rebuild', label: 'Unreal Rebuild' },
-  { id: 'image-driven', label: 'Ground Up from Images' }
-]
-
-const EFFECT_TYPES = [
-  { id: 'impact', label: 'Impact Burst' },
-  { id: 'projectile', label: 'Projectile Trail' },
-  { id: 'aura', label: 'Aura / Buff' },
-  { id: 'explosion', label: 'Explosion' },
-  { id: 'environment', label: 'Ambient / Environment' }
-]
-
-const TARGET_OPTIONS = [
-  { id: 'roblox-desktop', label: 'Roblox Desktop' },
-  { id: 'roblox-mobile', label: 'Roblox Mobile' },
-  { id: 'cross-platform', label: 'Desktop + Mobile' }
-]
-
-const PERFORMANCE_OPTIONS = [
-  { id: 'low', label: 'Low Cost' },
-  { id: 'medium', label: 'Balanced' },
-  { id: 'high', label: 'Hero Effect' }
-]
-
-const OUTPUT_OPTIONS = [
-  { id: 'attachment', label: 'Attachment-based prefab' },
-  { id: 'part', label: 'Part-based prefab' },
-  { id: 'module-script', label: 'Reusable ModuleScript' }
-]
-
 const LAYER_TYPES = [
   { id: 'particle', label: 'Particle' },
   { id: 'beam', label: 'Beam' },
@@ -847,6 +815,21 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
   const [previewCache, setPreviewCache] = useState({})
   const [busy, setBusy] = useState('')
   const [notice, setNotice] = useState('')
+  const [deepseekApiKey, setDeepseekApiKey] = useState('')
+  const [apiKeyLoaded, setApiKeyLoaded] = useState(() => !window.api?.configGet)
+
+  useEffect(() => {
+    if (!window.api?.configGet) return undefined
+    window.api.configGet('deepseekApiKey').then((saved) => {
+      if (saved) setDeepseekApiKey(saved)
+      setApiKeyLoaded(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!apiKeyLoaded || !window.api?.configSet) return
+    window.api.configSet('deepseekApiKey', deepseekApiKey)
+  }, [apiKeyLoaded, deepseekApiKey])
 
   useEffect(() => {
     if (!setWorkflowState) return
@@ -1037,6 +1020,83 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
     }
   }, [luaScript, preset, workflow.effectName, workflowText])
 
+  const generateRecipe = useCallback(async () => {
+    if (!deepseekApiKey.trim()) {
+      setNotice('Add your DeepSeek API key before generating.')
+      return
+    }
+    if (!workflow.unrealValuesText.trim()) {
+      setNotice('Paste Niagara values before generating.')
+      return
+    }
+    setBusy('generate')
+    setNotice('Generating VFX recipe with DeepSeek…')
+
+    const result = await window.api.vfxGenerateRecipe({
+      apiKey: deepseekApiKey.trim(),
+      effectDescription: workflow.gameplayPurpose,
+      systemType: workflow.unrealSystemType,
+      niagaraText: workflow.unrealValuesText,
+      materialNotes: workflow.unrealMaterialNotes,
+      timingNotes: workflow.unrealTimingNotes
+    })
+
+    setBusy('')
+
+    if (!result?.success) {
+      setNotice(result?.error || 'Generation failed.')
+      return
+    }
+
+    const r = result.recipe || {}
+
+    const nextLayers = Array.isArray(r.layers) && r.layers.length > 0
+      ? r.layers.map((layer) =>
+          createLayer({
+            name: layer.name || 'Effect Part',
+            role: layer.role || '',
+            layerType: layer.layerType || 'particle',
+            shape: layer.shape || 'orb',
+            textureHint: layer.textureHint || '',
+            color: layer.color || '#a78bfa',
+            secondaryColor: layer.secondaryColor || '#f8fafc',
+            opacity: typeof layer.opacity === 'number' ? layer.opacity : 0.8,
+            lightEmission: typeof layer.lightEmission === 'number' ? layer.lightEmission : 1,
+            lightInfluence: typeof layer.lightInfluence === 'number' ? layer.lightInfluence : 0,
+            sizeMin: typeof layer.sizeMin === 'number' ? layer.sizeMin : 0.3,
+            sizeMax: typeof layer.sizeMax === 'number' ? layer.sizeMax : 1.2,
+            lifetimeMin: typeof layer.lifetimeMin === 'number' ? layer.lifetimeMin : 0.1,
+            lifetimeMax: typeof layer.lifetimeMax === 'number' ? layer.lifetimeMax : 0.5,
+            rate: typeof layer.rate === 'number' ? layer.rate : 25,
+            speedMin: typeof layer.speedMin === 'number' ? layer.speedMin : 8,
+            speedMax: typeof layer.speedMax === 'number' ? layer.speedMax : 20,
+            spread: typeof layer.spread === 'number' ? layer.spread : 25,
+            drag: typeof layer.drag === 'number' ? layer.drag : 0.1,
+            flipbookLayout: layer.flipbookLayout || 'None',
+            flipbookMode: layer.flipbookMode || 'None',
+            notes: layer.notes || '',
+            enabled: true
+          })
+        )
+      : null
+
+    setWorkflow((prev) => ({
+      ...prev,
+      effectName: r.effectName || prev.effectName,
+      effectType: r.effectType || prev.effectType,
+      sourceMode: r.sourceMode || prev.sourceMode,
+      targetPlatform: r.targetPlatform || prev.targetPlatform,
+      performanceTarget: r.performanceTarget || prev.performanceTarget,
+      outputMode: r.outputMode || prev.outputMode,
+      gameplayPurpose: r.gameplayPurpose || prev.gameplayPurpose,
+      visualDirection: r.visualDirection || prev.visualDirection,
+      implementationNotes: r.implementationNotes || prev.implementationNotes,
+      ...(nextLayers ? { layers: nextLayers, activeLayerId: nextLayers[0]?.id || null } : {})
+    }))
+
+    setNotice(`Recipe generated — "${r.effectName || 'effect'}" with ${nextLayers ? nextLayers.length : 0} effect parts.`)
+  }, [deepseekApiKey, workflow.gameplayPurpose, workflow.unrealSystemType, workflow.unrealValuesText, workflow.unrealMaterialNotes, workflow.unrealTimingNotes])
+
   const provider = PROVIDERS[workflow.aiProvider] || PROVIDERS.manus
 
   return (
@@ -1046,8 +1106,8 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
           <div>
             <h1 style={S.title}>VFX Workflow Studio</h1>
             <p style={S.subtitle}>
-              Build Roblox-ready particle workflows from Unreal references, loose Niagara notes, or ground-up particle
-              images. The preview is Roblox-native, and exports are Lua + preset JSON + workflow handoff.
+              Paste Niagara values, hit Generate, and get a Roblox-ready VFX recipe. Fine-tune the effect parts, then
+              export Lua + preset JSON.
             </p>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
@@ -1065,152 +1125,82 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
         <aside style={S.rail}>
           <div style={{ display: 'grid', gap: 14 }}>
             <div style={S.card}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6' }}>Workflow Brief</div>
-                  <div style={{ fontSize: 11, color: '#555b6e', marginTop: 4 }}>
-                    Define the effect before tuning the main effect parts.
-                  </div>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6' }}>Niagara Input</div>
+                <div style={{ fontSize: 11, color: '#555b6e', marginTop: 4 }}>
+                  Paste your Niagara system values and hit Generate to build the Roblox VFX recipe automatically.
                 </div>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    padding: '3px 7px',
-                    borderRadius: 999,
-                    background: '#1e2330',
-                    color: '#93c5fd'
-                  }}
-                >
-                  {provider.label}
-                </span>
               </div>
 
               <div style={{ display: 'grid', gap: 12 }}>
                 <div>
-                  <label style={S.label}>Project Name</label>
+                  <label style={S.label}>Effect Description (optional)</label>
                   <input
                     style={S.input}
-                    value={workflow.projectName}
-                    onChange={(event) => setField('projectName', event.target.value)}
-                    placeholder="Spellbound Arena"
-                  />
-                </div>
-                <div>
-                  <label style={S.label}>Effect Name</label>
-                  <input
-                    style={S.input}
-                    value={workflow.effectName}
-                    onChange={(event) => setField('effectName', event.target.value)}
-                    placeholder="Arcane Burst"
-                  />
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <div>
-                    <label style={S.label}>Source Mode</label>
-                    <select
-                      style={S.input}
-                      value={workflow.sourceMode}
-                      onChange={(event) => setField('sourceMode', event.target.value)}
-                    >
-                      {SOURCE_MODES.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={S.label}>Effect Type</label>
-                    <select
-                      style={S.input}
-                      value={workflow.effectType}
-                      onChange={(event) => setField('effectType', event.target.value)}
-                    >
-                      {EFFECT_TYPES.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <div>
-                    <label style={S.label}>Target</label>
-                    <select
-                      style={S.input}
-                      value={workflow.targetPlatform}
-                      onChange={(event) => setField('targetPlatform', event.target.value)}
-                    >
-                      {TARGET_OPTIONS.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={S.label}>Performance</label>
-                    <select
-                      style={S.input}
-                      value={workflow.performanceTarget}
-                      onChange={(event) => setField('performanceTarget', event.target.value)}
-                    >
-                      {PERFORMANCE_OPTIONS.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label style={S.label}>Roblox Output Mode</label>
-                  <select
-                    style={S.input}
-                    value={workflow.outputMode}
-                    onChange={(event) => setField('outputMode', event.target.value)}
-                  >
-                    {OUTPUT_OPTIONS.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={S.label}>Gameplay Purpose</label>
-                  <textarea
-                    style={{ ...S.textarea, minHeight: 72 }}
                     value={workflow.gameplayPurpose}
                     onChange={(event) => setField('gameplayPurpose', event.target.value)}
-                    placeholder="What player action or event does this effect sell?"
+                    placeholder="Ability hit confirm, explosion on death, ambient fire loop…"
                   />
                 </div>
 
                 <div>
-                  <label style={S.label}>Visual Direction</label>
-                  <textarea
-                    style={{ ...S.textarea, minHeight: 78 }}
-                    value={workflow.visualDirection}
-                    onChange={(event) => setField('visualDirection', event.target.value)}
-                    placeholder="Readable anime magic, smoky industrial blast, icy shard burst..."
+                  <label style={S.label}>Niagara System Type</label>
+                  <input
+                    style={S.input}
+                    value={workflow.unrealSystemType}
+                    onChange={(event) => setField('unrealSystemType', event.target.value)}
+                    placeholder="Niagara"
                   />
                 </div>
 
                 <div>
-                  <label style={S.label}>Implementation Notes</label>
+                  <label style={S.label}>Niagara Values / Exported Parameters</label>
                   <textarea
-                    style={{ ...S.textarea, minHeight: 78 }}
-                    value={workflow.implementationNotes}
-                    onChange={(event) => setField('implementationNotes', event.target.value)}
-                    placeholder="Constraints, platform notes, shader limitations, gameplay readability..."
+                    style={{ ...S.textarea, minHeight: 130 }}
+                    value={workflow.unrealValuesText}
+                    onChange={(event) => setField('unrealValuesText', event.target.value)}
+                    placeholder="Paste spawn rate, lifetime, velocity, color over life, curl noise, etc."
                   />
                 </div>
+
+                <div>
+                  <label style={S.label}>Material / Texture Notes (optional)</label>
+                  <textarea
+                    style={{ ...S.textarea, minHeight: 60 }}
+                    value={workflow.unrealMaterialNotes}
+                    onChange={(event) => setField('unrealMaterialNotes', event.target.value)}
+                    placeholder="Additive, soft glow, masked smoke, flipbook, distortion…"
+                  />
+                </div>
+
+                <div>
+                  <label style={S.label}>Timing Notes (optional)</label>
+                  <textarea
+                    style={{ ...S.textarea, minHeight: 54 }}
+                    value={workflow.unrealTimingNotes}
+                    onChange={(event) => setField('unrealTimingNotes', event.target.value)}
+                    placeholder="0–0.08 s flash, 0.12 s sparks, 0.3–1.0 s smoke decay…"
+                  />
+                </div>
+
+                <div>
+                  <label style={S.label}>DeepSeek API Key</label>
+                  <input
+                    style={S.input}
+                    type="password"
+                    value={deepseekApiKey}
+                    onChange={(event) => setDeepseekApiKey(event.target.value)}
+                    placeholder="sk-…"
+                  />
+                </div>
+
+                <button
+                  style={{ ...S.button, width: '100%', opacity: busy === 'generate' ? 0.6 : 1 }}
+                  disabled={busy === 'generate'}
+                  onClick={generateRecipe}
+                >
+                  {busy === 'generate' ? 'Generating…' : 'Generate VFX Recipe'}
+                </button>
               </div>
             </div>
 
@@ -1332,58 +1322,15 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
                 ))}
               </div>
             </div>
-
-            <div style={S.card}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>Unreal Notes</div>
-              <div style={{ display: 'grid', gap: 12 }}>
-                <div>
-                  <label style={S.label}>System Type</label>
-                  <input
-                    style={S.input}
-                    value={workflow.unrealSystemType}
-                    onChange={(event) => setField('unrealSystemType', event.target.value)}
-                    placeholder="Niagara"
-                  />
-                </div>
-                <div>
-                  <label style={S.label}>Niagara Values / Exported Parameters</label>
-                  <textarea
-                    style={{ ...S.textarea, minHeight: 100 }}
-                    value={workflow.unrealValuesText}
-                    onChange={(event) => setField('unrealValuesText', event.target.value)}
-                    placeholder="Spawn rate, lifetime, velocity, color over life, curl/noise notes..."
-                  />
-                </div>
-                <div>
-                  <label style={S.label}>Material / Texture Notes</label>
-                  <textarea
-                    style={{ ...S.textarea, minHeight: 82 }}
-                    value={workflow.unrealMaterialNotes}
-                    onChange={(event) => setField('unrealMaterialNotes', event.target.value)}
-                    placeholder="Additive, soft glow, masked smoke, flipbook, distortion, etc."
-                  />
-                </div>
-                <div>
-                  <label style={S.label}>Timing Notes</label>
-                  <textarea
-                    style={{ ...S.textarea, minHeight: 72 }}
-                    value={workflow.unrealTimingNotes}
-                    onChange={(event) => setField('unrealTimingNotes', event.target.value)}
-                    placeholder="0-0.08s flash, 0.12s sparks, 0.3-1.0s smoke decay..."
-                  />
-                </div>
-              </div>
-            </div>
           </div>
         </aside>
 
         <main style={S.editor}>
           <div style={{ display: 'grid', gap: 18 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
               <StatChip label="Effect Parts" value={preset.metrics.layerCount} />
               <StatChip label="Estimated Cost" value={preset.metrics.estimatedCost} accent="#fb7185" />
               <StatChip label="References" value={preset.metrics.referenceCount} accent="#34d399" />
-              <StatChip label="Provider" value={provider.label} accent={provider.accent} />
             </div>
 
             <div style={S.card}>

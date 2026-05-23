@@ -21,6 +21,9 @@ const api = {
   readTextFile: (opts) => ipcRenderer.invoke('fs:readTextFile', opts),
   writeTextFile: (opts) => ipcRenderer.invoke('fs:writeTextFile', opts),
   exportVfxPackage: (opts) => ipcRenderer.invoke('vfx:exportPackage', opts),
+  vfxGenerateRecipe: (opts) => ipcRenderer.invoke('vfx:generateRecipe', opts),
+  sfxGenerateRecipe: (opts) => ipcRenderer.invoke('sfx:generateRecipe', opts),
+  buildingGenerateRecipe: (opts) => ipcRenderer.invoke('building:generateRecipe', opts),
 
   // Config
   configGet: (key) => ipcRenderer.invoke('config:get', key),
@@ -41,14 +44,18 @@ const api = {
 
   // Hosted image generation
   replicateGenerateClothing: (opts) => ipcRenderer.invoke('replicate:generateClothing', opts),
+  clothingGenerateGptImage: (opts) => ipcRenderer.invoke('clothing:generateGptImage', opts),
 
   // Modeling pipeline
   openImage: () => ipcRenderer.invoke('dialog:openImage'),
+  openMesh: () => ipcRenderer.invoke('dialog:openMesh'),
   openGLTF: () => ipcRenderer.invoke('dialog:openGLTF'),
   saveFolder: (opts) => ipcRenderer.invoke('dialog:saveFolder', opts),
   listGeneratedModels: () => ipcRenderer.invoke('modeling:listGeneratedModels'),
   saveGeneratedModel: (opts) => ipcRenderer.invoke('modeling:saveGeneratedModel', opts),
   readFileAsDataURL: (opts) => ipcRenderer.invoke('fs:readFileAsDataURL', opts),
+  optimizeMesh: (opts) => ipcRenderer.invoke('mesh:optimize', opts),
+  retopologyMesh: (opts) => ipcRenderer.invoke('mesh:retopologyBlender', opts),
   onModelingProgress: (cb) => {
     const handler = (_, data) => cb(data)
     ipcRenderer.on('modeling:progress', handler)
@@ -58,6 +65,11 @@ const api = {
     const handler = (_, data) => cb(data)
     ipcRenderer.on('clothing:progress', handler)
     return () => ipcRenderer.removeListener('clothing:progress', handler)
+  },
+  onRetopologyProgress: (cb) => {
+    const handler = (_, data) => cb(data)
+    ipcRenderer.on('mesh:retopologyProgress', handler)
+    return () => ipcRenderer.removeListener('mesh:retopologyProgress', handler)
   },
 
   // Progress events

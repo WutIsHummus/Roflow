@@ -764,9 +764,9 @@ function captureTripoWebDownload(win, outDir, timeoutMs = 300000) {
   })
 }
 
-async function triggerTripoWebDownload(win) {
+async function triggerTripoWebDownload(win, preferredFormat = 'glb') {
   return win.webContents.executeJavaScript(`
-    (() => {
+    ((fmt) => {
       const visible = (el) => {
         if (!el) return false
         const style = window.getComputedStyle(el)
@@ -774,6 +774,15 @@ async function triggerTripoWebDownload(win) {
         return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
       }
       const textOf = (el) => (el?.innerText || el?.textContent || '').trim()
+
+      // If a non-GLB format is requested, try to find and click a format selector first
+      if (fmt !== 'glb') {
+        const fmtRe = new RegExp('^' + fmt + '$', 'i')
+        const fmtBtn = Array.from(document.querySelectorAll('button,a,[role="button"],li,[role="option"]'))
+          .filter(visible)
+          .find(el => fmtRe.test(textOf(el).split(/[\\s/|,]/)[0]))
+        if (fmtBtn) { fmtBtn.click(); return { action: 'format', format: textOf(fmtBtn) } }
+      }
 
       const directLink = Array.from(document.querySelectorAll('a[href]'))
         .filter(visible)
@@ -791,11 +800,162 @@ async function triggerTripoWebDownload(win) {
       }
 
       return { action: 'none' }
-    })()
+    })(${JSON.stringify(preferredFormat)})
   `)
 }
 
-// ── IPC: File Dialogs ──────────────────────────────────────────────────────
+// ── Tripo image-to-3D: attach a reference image via CDP ──────────────────
+
+async function uploadImageToTripoWebPage(win, imagePath) {
+  // Step 1: try to reveal the file input by clicking any upload-related area
+  const preClick = await win.webContents.executeJavaScript(`
+    (() => {
+      const visible = (el) => {
+        if (!el) return false
+        const s = window.getComputedStyle(el)
+        const r = el.getBoundingClientRect()
+        return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 4 && r.height > 4
+      }
+      // Direct visible file input
+      const direct = Array.from(document.querySelectorAll('input[type="file"]')).find(el =>
+        !el.accept || el.accept.includes('image') || el.accept === '*' || el.accept === 'image/*'
+      )
+      if (direct) { window.__tripoImgInput = direct; return 'found' }
+      // Upload trigger button
+      const trigger = Array.from(document.querySelectorAll('button,[role="button"],[class*="upload"],[class*="Upload"]'))
+        .filter(visible)
+        .find(el => /upload|image|photo|picture/i.test((el.innerText || el.textContent || el.className || '')))
+      if (trigger) { trigger.click(); return 'clicked' }
+      return 'none'
+    })()
+  `)
+
+  if (preClick === 'clicked') await wait(1200)
+
+  // Step 2: grab first available file input (may now be visible after click)
+  await win.webContents.executeJavaScript(`
+    (() => {
+      const inputs = Array.from(document.querySelectorAll('input[type="file"]'))
+      const pick = inputs.find(el => !el.accept || el.accept.includes('image') || el.accept === '*' || el.accept === 'image/*') || inputs[0]
+      if (pick) window.__tripoImgInput = pick
+    })()
+  `)
+
+  // Step 3: use CDP DOM.setFileInputFiles to inject the local file path
+  let dbg = null
+  try {
+    dbg = win.webContents.debugger
+    if (!dbg.isAttached()) dbg.attach('1.3')
+
+    const evalRes = await dbg.sendCommand('Runtime.evaluate', {
+      expression: 'window.__tripoImgInput',
+      returnByValue: false
+    })
+    if (!evalRes.result?.objectId) {
+      return { success: false, error: 'No image file input found on the Tripo page. Switch to the Image-to-3D tab manually and retry.' }
+    }
+
+    const nodeRes = await dbg.sendCommand('DOM.requestNode', { objectId: evalRes.result.objectId })
+    await dbg.sendCommand('DOM.setFileInputFiles', { files: [imagePath], nodeId: nodeRes.nodeId })
+
+    // Dispatch events so the framework reacts
+    await win.webContents.executeJavaScript(`
+      (() => {
+        const inp = window.__tripoImgInput
+        if (!inp) return
+        inp.dispatchEvent(new Event('change', { bubbles: true }))
+        inp.dispatchEvent(new Event('input', { bubbles: true }))
+      })()
+    `)
+
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: `Image injection failed: ${err.message}` }
+  } finally {
+    if (dbg?.isAttached()) {
+      try { dbg.detach() } catch { /* ignore */ }
+    }
+  }
+}
+
+// ── Tripo multiview: upload 2–4 angle images via CDP ─────────────────────
+
+async function uploadMultiviewImagesToTripoWebPage(win, imagePaths) {
+  const validPaths = (imagePaths || []).filter(Boolean)
+  if (!validPaths.length) return { success: false, error: 'No images provided for multiview.' }
+
+  // Try to click the multiview tab on the Tripo page
+  await win.webContents.executeJavaScript(`
+    (() => {
+      const visible = (el) => {
+        if (!el) return false
+        const s = window.getComputedStyle(el)
+        const r = el.getBoundingClientRect()
+        return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 4 && r.height > 4
+      }
+      const el = Array.from(document.querySelectorAll('button,[role="tab"],[role="button"],li'))
+        .filter(visible)
+        .find(e => /multi.?view|multiple images?|多视角|multi view/i.test((e.innerText || e.textContent || e.className || '')))
+      if (el) { el.click(); return 'clicked' }
+      return 'none'
+    })()
+  `)
+  await wait(1500)
+
+  // Collect all image file inputs on the page
+  await win.webContents.executeJavaScript(`
+    (() => {
+      const inputs = Array.from(document.querySelectorAll('input[type="file"]'))
+        .filter(el => !el.accept || el.accept.includes('image') || el.accept === '*' || el.accept === 'image/*')
+      window.__tripoMultiviewInputs = inputs
+    })()
+  `)
+
+  let dbg = null
+  try {
+    dbg = win.webContents.debugger
+    if (!dbg.isAttached()) dbg.attach('1.3')
+
+    const inputCountRes = await dbg.sendCommand('Runtime.evaluate', {
+      expression: '(window.__tripoMultiviewInputs || []).length',
+      returnByValue: true
+    })
+    const inputCount = inputCountRes.result?.value || 0
+    const slotsAvailable = Math.max(inputCount, 1)
+    const uploads = Math.min(validPaths.length, slotsAvailable)
+
+    for (let i = 0; i < uploads; i++) {
+      const imagePath = validPaths[i]
+      const evalRes = await dbg.sendCommand('Runtime.evaluate', {
+        expression: `window.__tripoMultiviewInputs[${i}]`,
+        returnByValue: false
+      })
+      if (!evalRes.result?.objectId) continue
+
+      const nodeRes = await dbg.sendCommand('DOM.requestNode', { objectId: evalRes.result.objectId })
+      await dbg.sendCommand('DOM.setFileInputFiles', { files: [imagePath], nodeId: nodeRes.nodeId })
+
+      await win.webContents.executeJavaScript(`
+        (() => {
+          const inp = window.__tripoMultiviewInputs[${i}]
+          if (!inp) return
+          inp.dispatchEvent(new Event('change', { bubbles: true }))
+          inp.dispatchEvent(new Event('input', { bubbles: true }))
+        })()
+      `)
+      await wait(400)
+    }
+
+    return { success: true, uploaded: uploads }
+  } catch (err) {
+    return { success: false, error: `Multiview image injection failed: ${err.message}` }
+  } finally {
+    if (dbg?.isAttached()) {
+      try { dbg.detach() } catch { /* ignore */ }
+    }
+  }
+}
+
 
 ipcMain.handle('dialog:openVideo', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -1175,6 +1335,295 @@ ipcMain.handle('vfx:exportPackage', async (_, payload) => {
   }
 })
 
+// ── IPC: VFX — AI Recipe Generation (DeepSeek) ───────────────────────────
+
+const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions'
+const DEEPSEEK_MODEL = 'deepseek-v4'
+
+ipcMain.handle('vfx:generateRecipe', async (_, payload) => {
+  try {
+    const { niagaraText, effectDescription, systemType, materialNotes, timingNotes, apiKey } = payload || {}
+
+    if (!apiKey) {
+      return { success: false, error: 'A DeepSeek API key is required. Add it in the VFX panel.' }
+    }
+
+    const userLines = [
+      effectDescription ? `Effect description: ${effectDescription}` : null,
+      `Niagara system type: ${systemType || 'Niagara'}`,
+      '',
+      'Niagara values / exported parameters:',
+      niagaraText || '(none provided)',
+      '',
+      materialNotes ? `Material / texture notes: ${materialNotes}` : null,
+      timingNotes ? `Timing notes: ${timingNotes}` : null
+    ]
+      .filter((line) => line !== null)
+      .join('\n')
+
+    const systemPrompt = `You are a Roblox VFX expert specialising in converting Unreal Engine Niagara systems into Roblox ParticleEmitter / Beam / Trail / BillboardGui setups. You always respond with valid JSON only — no markdown, no extra text.`
+
+    const userPrompt = `Analyse this Niagara VFX system and return a complete Roblox VFX recipe as a JSON object.
+
+${userLines}
+
+Return exactly this JSON structure (all fields required):
+{
+  "effectName": "short display name",
+  "effectType": "impact" | "projectile" | "aura" | "explosion" | "environment",
+  "sourceMode": "hybrid" | "unreal-rebuild" | "image-driven",
+  "targetPlatform": "roblox-desktop" | "roblox-mobile" | "cross-platform",
+  "performanceTarget": "low" | "medium" | "high",
+  "outputMode": "attachment" | "part" | "module-script",
+  "gameplayPurpose": "one sentence — what player action triggers this effect",
+  "visualDirection": "art direction and visual style notes",
+  "implementationNotes": "Roblox-specific constraints and approximation notes",
+  "layers": [
+    {
+      "name": "descriptive layer name",
+      "role": "what this layer contributes visually",
+      "layerType": "particle" | "beam" | "trail" | "billboard" | "ring",
+      "shape": "orb" | "spark" | "smoke" | "ring" | "slash" | "flare",
+      "textureHint": "sprite or flipbook description",
+      "color": "#rrggbb",
+      "secondaryColor": "#rrggbb",
+      "opacity": 0.8,
+      "lightEmission": 1.0,
+      "lightInfluence": 0.0,
+      "sizeMin": 0.3,
+      "sizeMax": 1.2,
+      "lifetimeMin": 0.1,
+      "lifetimeMax": 0.5,
+      "rate": 25,
+      "speedMin": 8.0,
+      "speedMax": 20.0,
+      "spread": 25,
+      "drag": 0.1,
+      "flipbookLayout": "None",
+      "flipbookMode": "None",
+      "notes": ""
+    }
+  ]
+}
+
+Include 2 to 4 layers. Choose values that are practical for Roblox and mobile-friendly where possible.`
+
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.4
+      })
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      return { success: false, error: `DeepSeek API error ${response.status}: ${errText.slice(0, 240)}` }
+    }
+
+    const data = await response.json()
+    const content = data?.choices?.[0]?.message?.content
+    if (!content) {
+      return { success: false, error: 'DeepSeek returned an empty response.' }
+    }
+
+    let recipe
+    try {
+      recipe = JSON.parse(content)
+    } catch {
+      return { success: false, error: 'DeepSeek response was not valid JSON.' }
+    }
+
+    return { success: true, recipe }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+// ── IPC: SFX — AI Recipe Generation (DeepSeek) ───────────────────────────
+
+ipcMain.handle('sfx:generateRecipe', async (_, payload) => {
+  try {
+    const { description, category, gameContext, apiKey } = payload || {}
+
+    if (!apiKey) {
+      return { success: false, error: 'A DeepSeek API key is required. Add it in the SFX panel.' }
+    }
+    if (!description?.trim()) {
+      return { success: false, error: 'A sound description is required.' }
+    }
+
+    const systemPrompt = `You are a Roblox audio designer specialising in SoundService configuration and Lua scripting. You always respond with valid JSON only — no markdown, no extra text.`
+
+    const userPrompt = `Design a Roblox SoundService setup for the following:
+
+Sound description: ${description.trim()}
+Category: ${category || 'general'}
+Game context: ${gameContext || '(not specified)'}
+
+Return exactly this JSON structure (all fields required):
+{
+  "soundName": "short descriptive name",
+  "category": "hit" | "ambient" | "ui" | "music" | "ability" | "environment",
+  "description": "one sentence design brief",
+  "looped": false,
+  "volume": 0.85,
+  "rollOffMaxDistance": 80,
+  "rollOffMinDistance": 10,
+  "playbackSpeed": 1.0,
+  "soundEffects": [
+    {
+      "type": "EqualizerSoundEffect" | "ReverbSoundEffect" | "DistortionSoundEffect" | "CompressorSoundEffect" | "PitchShiftSoundEffect" | "TremoloSoundEffect",
+      "params": { }
+    }
+  ],
+  "layerBreakdown": [
+    {
+      "name": "layer name",
+      "role": "what it contributes",
+      "frequency": "low" | "mid" | "high",
+      "notes": ""
+    }
+  ],
+  "audioSearchTerms": [
+    { "source": "Roblox Audio Marketplace", "query": "search keywords" },
+    { "source": "Freesound.org", "query": "search keywords" }
+  ],
+  "luaScript": "-- Roblox SoundService Lua (use double backslash n for newlines, not actual newlines)",
+  "designNotes": "implementation guidance"
+}
+
+For soundEffects, use only 1–3 effects with realistic Roblox parameter values.
+For layerBreakdown, include 2–3 layers.
+The luaScript must be a single JSON string — escape all newlines as \\n and quotes as \\".`
+
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.4
+      })
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      return { success: false, error: `DeepSeek API error ${response.status}: ${errText.slice(0, 240)}` }
+    }
+
+    const data = await response.json()
+    const content = data?.choices?.[0]?.message?.content
+    if (!content) return { success: false, error: 'DeepSeek returned an empty response.' }
+
+    let recipe
+    try { recipe = JSON.parse(content) } catch {
+      return { success: false, error: 'DeepSeek response was not valid JSON.' }
+    }
+
+    return { success: true, recipe }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+// ── IPC: Building — AI Recipe Generation (DeepSeek) ──────────────────────
+
+ipcMain.handle('building:generateRecipe', async (_, payload) => {
+  try {
+    const { description, style, gameType, apiKey } = payload || {}
+
+    if (!apiKey) {
+      return { success: false, error: 'A DeepSeek API key is required. Add it in the Building panel.' }
+    }
+    if (!description?.trim()) {
+      return { success: false, error: 'A building description is required.' }
+    }
+
+    const systemPrompt = `You are a Roblox 3D environment designer and Lua scripter. You decompose building descriptions into 3D components ready for Tripo3D generation and Roblox Studio assembly. You always respond with valid JSON only — no markdown, no extra text.`
+
+    const userPrompt = `Design a Roblox building for the following:
+
+Building description: ${description.trim()}
+Architectural style: ${style || 'generic'}
+Game type / genre: ${gameType || '(not specified)'}
+
+Return exactly this JSON structure:
+{
+  "buildingName": "descriptive building name",
+  "style": "architectural style label",
+  "description": "one sentence brief",
+  "theme": "game theme",
+  "components": [
+    {
+      "name": "component name",
+      "tripoPrompt": "optimised text-to-3D prompt for Tripo3D (80 words max, no commas, descriptive)",
+      "robloxSize": "WxHxD in studs, e.g. 20x8x20",
+      "robloxMaterial": "SmoothPlastic" | "Brick" | "Wood" | "WoodPlanks" | "Concrete" | "Metal" | "Slate" | "Marble",
+      "robloxColor": "#rrggbb",
+      "assemblyHint": "brief Roblox Studio placement note",
+      "priority": 1
+    }
+  ],
+  "luaScript": "-- Roblox Studio script (escape newlines as \\n)",
+  "designNotes": "style guidance and material recommendations"
+}
+
+Include 3–6 components covering the most important structural parts (foundation, walls, roof, door, etc.). Order components by build priority (1 = first). The tripoPrompt must be phrased for a text-to-3D model generator — focus on shape, style, material.`
+
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.4
+      })
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      return { success: false, error: `DeepSeek API error ${response.status}: ${errText.slice(0, 240)}` }
+    }
+
+    const data = await response.json()
+    const content = data?.choices?.[0]?.message?.content
+    if (!content) return { success: false, error: 'DeepSeek returned an empty response.' }
+
+    let recipe
+    try { recipe = JSON.parse(content) } catch {
+      return { success: false, error: 'DeepSeek response was not valid JSON.' }
+    }
+
+    return { success: true, recipe }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
 ipcMain.handle('modeling:listGeneratedModels', async () => {
   try {
     const items = [
@@ -1203,6 +1652,17 @@ ipcMain.handle('dialog:openGLTF', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select R15 Rig File',
     filters: [{ name: '3D Model', extensions: ['glb', 'gltf'] }],
+    properties: ['openFile']
+  })
+  return result.canceled ? null : result.filePaths[0]
+})
+
+// ── IPC: File Dialogs — Mesh import (accessories / environment) ──────────
+
+ipcMain.handle('dialog:openMesh', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import 3D Mesh',
+    filters: [{ name: '3D Mesh', extensions: ['glb', 'gltf', 'fbx', 'obj'] }],
     properties: ['openFile']
   })
   return result.canceled ? null : result.filePaths[0]
@@ -1350,6 +1810,90 @@ ipcMain.handle(
       }
 
       return { success: false, error: 'Timed out waiting for Replicate output.' }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  }
+)
+
+// ── IPC: GPT Image 2 clothing generation (Azure / GitHub Models) ──────────
+
+ipcMain.handle(
+  'clothing:generateGptImage',
+  async (event, { apiToken, prompt, inputImagePath, inputImageDataUrl } = {}) => {
+    try {
+      if (!apiToken?.trim()) {
+        return { success: false, error: 'GitHub / Azure API token required.' }
+      }
+      if (!prompt?.trim()) {
+        return { success: false, error: 'A clothing prompt is required.' }
+      }
+
+      // Resolve image bytes from either a data URL or a file path
+      let imageBuffer
+      if (inputImageDataUrl?.trim()) {
+        const base64Data = inputImageDataUrl.trim().replace(/^data:[^;]+;base64,/, '')
+        imageBuffer = Buffer.from(base64Data, 'base64')
+      } else if (inputImagePath?.trim() && existsSync(inputImagePath)) {
+        imageBuffer = readFileSync(inputImagePath)
+      } else {
+        return { success: false, error: 'Attach a Roblox clothing template image first.' }
+      }
+
+      event.sender.send('clothing:progress', { step: 'Sending template to GPT Image…', pct: 15 })
+
+      const outDir = join(app.getPath('temp'), 'ai-game-dev-hub')
+      if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
+
+      // Build multipart/form-data body using FormData + Blob (Node 18+)
+      const form = new FormData()
+      form.append('model', 'gpt-image-1')
+      form.append('prompt', prompt.trim())
+      form.append('n', '1')
+      form.append('size', '1024x1024')
+      // Append image as a Blob so fetch sends it with the correct content-type
+      const imageBlob = new Blob([imageBuffer], { type: 'image/png' })
+      form.append('image', imageBlob, 'template.png')
+
+      event.sender.send('clothing:progress', { step: 'Generating clothing texture…', pct: 30 })
+
+      const response = await fetch('https://models.inference.ai.azure.com/images/edits', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiToken.trim()}`
+          // Do NOT set Content-Type; fetch sets it automatically for FormData
+        },
+        body: form
+      })
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '')
+        let errMsg
+        try {
+          const parsed = JSON.parse(errText)
+          errMsg = parsed?.error?.message || parsed?.message || errText
+        } catch {
+          errMsg = errText
+        }
+        return {
+          success: false,
+          error: `GPT Image API error ${response.status}: ${errMsg.slice(0, 280)}`
+        }
+      }
+
+      event.sender.send('clothing:progress', { step: 'Downloading generated texture…', pct: 88 })
+
+      const json = await response.json()
+      const b64 = json?.data?.[0]?.b64_json
+      if (!b64) {
+        return { success: false, error: 'GPT Image returned no image data.' }
+      }
+
+      const outputPath = join(outDir, `classic_clothing_gpt_${Date.now()}.png`)
+      writeFileSync(outputPath, Buffer.from(b64, 'base64'))
+
+      event.sender.send('clothing:progress', { step: 'Classic clothing texture ready!', pct: 100 })
+      return { success: true, outputPath, provider: 'gpt-image' }
     } catch (error) {
       return { success: false, error: error.message }
     }
@@ -1509,19 +2053,21 @@ ipcMain.handle(
     {
       prompt = '',
       imagePath = '',
+      multiviewImages = [],
       baseUrl,
       generateUrl,
       showBrowser = true,
-      keepWindowOpen = false
+      keepWindowOpen = false,
+      downloadFormat = 'glb'
     } = {}
   ) => {
     let win = null
+    const isMultiview = Array.isArray(multiviewImages) && multiviewImages.some(Boolean)
+    const isImageMode = Boolean(imagePath && imagePath.trim())
+
     try {
-      if (!prompt.trim()) {
-        return { success: false, error: 'Prompt is required for Tripo website automation.' }
-      }
-      if (imagePath) {
-        return { success: false, error: 'Website automation currently supports text-to-3D prompts only.' }
+      if (!prompt.trim() && !isImageMode && !isMultiview) {
+        return { success: false, error: 'A text prompt, a reference image, or multiview images are required.' }
       }
 
       const status = await inspectTripoWebSession(
@@ -1554,9 +2100,42 @@ ipcMain.handle(
       )
       if (!targetSurface.success) return { success: false, error: targetSurface.error }
 
-      event.sender.send('modeling:progress', { step: 'Submitting prompt in browser session…', pct: 24 })
-      const submit = await submitTripoWebPrompt(win, prompt.trim())
-      if (!submit.success) return { success: false, error: submit.error }
+      if (isMultiview) {
+        event.sender.send('modeling:progress', { step: 'Uploading multiview images to Tripo…', pct: 20 })
+        const upload = await uploadMultiviewImagesToTripoWebPage(win, multiviewImages.filter(Boolean))
+        if (!upload.success) return { success: false, error: upload.error }
+        await wait(1500)
+      } else if (isImageMode) {
+        event.sender.send('modeling:progress', { step: 'Uploading reference image to Tripo…', pct: 22 })
+        const upload = await uploadImageToTripoWebPage(win, imagePath.trim())
+        if (!upload.success) return { success: false, error: upload.error }
+        await wait(1500)
+      }
+
+      if (prompt.trim()) {
+        event.sender.send('modeling:progress', { step: 'Submitting prompt in browser session…', pct: isImageMode || isMultiview ? 30 : 24 })
+        const submit = await submitTripoWebPrompt(win, prompt.trim())
+        if (!submit.success) return { success: false, error: submit.error }
+      } else {
+        // Image/multiview-only: click generate/create button without typing a prompt
+        event.sender.send('modeling:progress', { step: isMultiview ? 'Triggering multiview-to-3D generation…' : 'Triggering image-to-3D generation…', pct: 30 })
+        const triggered = await win.webContents.executeJavaScript(`
+          (() => {
+            const visible = (el) => {
+              if (!el) return false
+              const s = window.getComputedStyle(el)
+              const r = el.getBoundingClientRect()
+              return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 4 && r.height > 4
+            }
+            const textOf = (el) => (el?.innerText || el?.textContent || '').trim()
+            const buttons = Array.from(document.querySelectorAll('button,a,[role="button"]')).filter(visible)
+            const btn = buttons.find(el => /generate|create|start|run/i.test(textOf(el)) && !/log in|sign in|download|export/i.test(textOf(el)))
+            if (btn) { btn.click(); return { success: true, button: textOf(btn) } }
+            return { success: false, error: 'Could not find a Generate/Create button.' }
+          })()
+        `)
+        if (!triggered?.success) return { success: false, error: triggered?.error || 'Could not trigger generation.' }
+      }
 
       const downloadPromise = captureTripoWebDownload(win, outDir)
 
@@ -1564,12 +2143,12 @@ ipcMain.handle(
         await wait(4000)
         const pct = Math.min(92, 30 + attempt)
         event.sender.send('modeling:progress', { step: 'Waiting for Tripo result…', pct })
-        const action = await triggerTripoWebDownload(win)
+        const action = await triggerTripoWebDownload(win, downloadFormat)
         if (action.action === 'downloadURL' && action.url) {
           win.webContents.downloadURL(action.url)
           break
         }
-        if (action.action === 'clicked') {
+        if (action.action === 'clicked' || action.action === 'format') {
           // Allow the page to open export menus or trigger a native download event.
           await wait(1500)
         }
@@ -1577,7 +2156,8 @@ ipcMain.handle(
 
       const outputPath = await downloadPromise
       event.sender.send('modeling:progress', { step: 'Model ready!', pct: 100 })
-      return { success: true, outputPath, provider: 'tripo-web' }
+      const provider = isMultiview ? 'tripo-web-multiview' : isImageMode ? 'tripo-web-image' : 'tripo-web'
+      return { success: true, outputPath, provider }
     } catch (err) {
       return {
         success: false,
@@ -1590,6 +2170,129 @@ ipcMain.handle(
     }
   }
 )
+
+// ── Blender path detection ────────────────────────────────────────────────
+
+function findBlenderExecutable(customPath) {
+  if (customPath && existsSync(customPath)) return customPath
+
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          ...['4.4', '4.3', '4.2', '4.1', '4.0', '3.6'].map(
+            (v) => `C:\\Program Files\\Blender Foundation\\Blender ${v}\\blender.exe`
+          ),
+          'blender.exe'
+        ]
+      : process.platform === 'darwin'
+        ? ['/Applications/Blender.app/Contents/MacOS/Blender', '/usr/local/bin/blender', 'blender']
+        : ['/usr/bin/blender', '/usr/local/bin/blender', 'blender']
+
+  return candidates.find((p) => existsSync(p)) || candidates[candidates.length - 1]
+}
+
+// ── Mesh retopology (Blender QuadriFlow) ─────────────────────────────────
+
+ipcMain.handle('mesh:retopologyBlender', async (event, { inputPath, targetFaces = 2000, blenderPath } = {}) => {
+  if (!inputPath || !existsSync(inputPath)) {
+    return { success: false, error: 'Input file not found.' }
+  }
+
+  const blender = findBlenderExecutable(blenderPath || loadConfig().blenderPath)
+  const scriptPath = join(getPythonDir(), 'retopo_blender.py')
+  const outputPath = inputPath.replace(/(\.[^.]+)$/, '_retopo.glb')
+
+  event.sender.send('mesh:retopologyProgress', { step: 'Starting Blender QuadriFlow retopology…', pct: 5 })
+
+  return new Promise((resolve) => {
+    let proc
+    try {
+      proc = spawn(blender, ['--background', '--python', scriptPath, '--', inputPath, outputPath, String(targetFaces)])
+    } catch (spawnErr) {
+      resolve({ success: false, error: `Could not start Blender: ${spawnErr.message}. Make sure Blender is installed.` })
+      return
+    }
+
+    let stderr = ''
+
+    proc.stdout.on('data', (data) => {
+      const msg = data.toString()
+      const progressMatch = msg.match(/PROGRESS:(\d+)/)
+      if (progressMatch) {
+        event.sender.send('mesh:retopologyProgress', { step: 'Remeshing with QuadriFlow…', pct: parseInt(progressMatch[1]) })
+      }
+      const errorMatch = msg.match(/ERROR:(.+)/)
+      if (errorMatch) {
+        event.sender.send('mesh:retopologyProgress', { step: `Blender: ${errorMatch[1].trim()}`, pct: 0 })
+      }
+    })
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString()
+    })
+
+    proc.on('close', (code) => {
+      if (code === 0 && existsSync(outputPath)) {
+        event.sender.send('mesh:retopologyProgress', { step: 'Retopology complete!', pct: 100 })
+        resolve({ success: true, outputPath })
+      } else {
+        const msg =
+          stderr.slice(0, 400) ||
+          `Blender exited with code ${code}. Ensure Blender (3.6+) is installed and accessible.`
+        resolve({ success: false, error: msg })
+      }
+    })
+
+    proc.on('error', (err) => {
+      resolve({
+        success: false,
+        error: `Could not start Blender: ${err.message}. Ensure Blender is installed and the path is correct.`
+      })
+    })
+  })
+})
+
+// ── Mesh optimization (polygon simplification + dedup/prune) ─────────────
+
+ipcMain.handle('mesh:optimize', async (_, { inputPath, ratio = 0.5 } = {}) => {
+  if (!inputPath || !existsSync(inputPath)) {
+    return { success: false, error: 'Input file not found.' }
+  }
+
+  try {
+    const { NodeIO } = await import('@gltf-transform/core')
+    const { simplify, dedup, prune, reorder, quantize } = await import('@gltf-transform/functions')
+    const { MeshoptSimplifier, MeshoptEncoder } = await import('meshoptimizer')
+
+    await MeshoptSimplifier.ready
+    await MeshoptEncoder.ready
+
+    const io = new NodeIO()
+    const document = await io.read(inputPath)
+
+    const transforms = [
+      dedup(),
+      prune(),
+      ...(ratio < 1.0 ? [simplify({ simplifier: MeshoptSimplifier, ratio: Math.max(0.01, Math.min(1.0, ratio)), error: 0.001 })] : []),
+      reorder({ encoder: MeshoptEncoder }),
+      quantize()
+    ]
+
+    await document.transform(...transforms)
+
+    const ext = inputPath.match(/\.[^.]+$/)?.[0] || '.glb'
+    const outputPath = inputPath.replace(/(\.[^.]+)$/, `_optimized${ext}`)
+    await io.write(outputPath, document)
+
+    const inputSize = statSync(inputPath).size
+    const outputSize = statSync(outputPath).size
+    const saved = Math.max(0, Math.round((1 - outputSize / inputSize) * 100))
+
+    return { success: true, outputPath, inputSize, outputSize, saved }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
 
 // ── App lifecycle ─────────────────────────────────────────────────────────
 
