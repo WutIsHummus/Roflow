@@ -253,7 +253,17 @@ async function createProviderWebWindow({
   })
 
   win.webContents.setWindowOpenHandler((details) => {
-    win.loadURL(details.url)
+    try {
+      const openHost = new URL(details.url).hostname
+      const baseHost = new URL(url).hostname
+      if (openHost === baseHost || openHost.endsWith(`.${baseHost}`)) {
+        win.loadURL(details.url)
+      } else {
+        shell.openExternal(details.url)
+      }
+    } catch {
+      // malformed URL — ignore
+    }
     return { action: 'deny' }
   })
 
