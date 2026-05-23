@@ -67,6 +67,7 @@ export default function PartsList({
   onDuplicate,
   onGenerate,
   onPartChange,
+  onImportMesh,
   showAttachPoint,
   tripoAssets = [],
   onAddTripoAsset,
@@ -108,6 +109,22 @@ export default function PartsList({
               }}
             >
               + Blank Part
+            </button>
+            <button
+              onClick={() => onImportMesh?.()}
+              style={{
+                background: '#12151d',
+                border: '1px solid #1e2330',
+                borderRadius: 7,
+                padding: '7px 10px',
+                fontSize: 12,
+                fontWeight: 700,
+                color: '#9499a8',
+                cursor: 'pointer'
+              }}
+              title="Import a GLB/GLTF/FBX/OBJ mesh directly"
+            >
+              📂 Import Mesh
             </button>
           </div>
         </div>
@@ -392,6 +409,7 @@ function TripoAssetCard({ asset, onAdd, actionLabel }) {
 function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange, showAttachPoint }) {
   const [focusPrompt, setFocusPrompt] = useState(false)
   const [focusName, setFocusName] = useState(false)
+  const [imageMode, setImageMode] = useState(Boolean(part.imagePath))
 
   const STATUS = {
     pending:    { color: '#555b6e', label: 'Pending' },
@@ -401,7 +419,20 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
   }
   const st = STATUS[part.status || 'pending']
   const busy = part.status === 'generating'
-  const canGen = (part.prompt || '').trim().length > 0 && !busy
+  const canGen = ((part.prompt || '').trim().length > 0 || Boolean(part.imagePath)) && !busy
+
+  async function pickReferenceImage() {
+    if (!window.api?.openImage) return
+    const filePath = await window.api.openImage()
+    if (!filePath) return
+    onPartChange({ imagePath: filePath })
+    setImageMode(true)
+  }
+
+  function clearReferenceImage() {
+    onPartChange({ imagePath: null })
+    if (!(part.prompt || '').trim()) setImageMode(false)
+  }
 
   return (
     <div style={{
@@ -481,7 +512,7 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
         onChange={e => onPartChange({ prompt: e.target.value })}
         onFocus={() => setFocusPrompt(true)}
         onBlur={() => setFocusPrompt(false)}
-        placeholder="Describe this part…"
+        placeholder={imageMode ? 'Optional prompt for image-to-3D…' : 'Describe this part…'}
         rows={3}
         spellCheck={false}
         autoCorrect="off"
@@ -500,6 +531,60 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
           boxSizing: 'border-box', transition: 'border-color .15s, box-shadow .15s',
         }}
       />
+
+      {/* Image mode toggle + reference image */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+        <button
+          onClick={() => setImageMode(v => !v)}
+          style={{
+            background: imageMode ? 'rgba(124,58,237,0.18)' : '#12151d',
+            border: imageMode ? '1px solid rgba(124,58,237,0.45)' : '1px solid #1e2330',
+            borderRadius: 6,
+            padding: '4px 9px',
+            fontSize: 10,
+            fontWeight: 700,
+            color: imageMode ? '#c4b5fd' : '#555b6e',
+            cursor: 'pointer',
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase'
+          }}
+        >
+          🖼 Image-to-3D
+        </button>
+        {imageMode && (
+          <>
+            {part.imagePath ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 11, color: '#4ade80', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  ✓ {part.imagePath.split(/[\\/]/).pop()}
+                </span>
+                <button
+                  onClick={clearReferenceImage}
+                  style={{ background: 'none', border: 'none', color: '#7c8499', cursor: 'pointer', fontSize: 11, padding: '2px 4px', flexShrink: 0 }}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={pickReferenceImage}
+                style={{
+                  background: '#12151d',
+                  border: '1px solid #252a36',
+                  borderRadius: 6,
+                  padding: '4px 9px',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#9499a8',
+                  cursor: 'pointer'
+                }}
+              >
+                Attach Image…
+              </button>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Attach point selector */}
       {showAttachPoint && (

@@ -795,7 +795,79 @@ async function triggerTripoWebDownload(win) {
   `)
 }
 
-// ── IPC: File Dialogs ──────────────────────────────────────────────────────
+// ── Tripo image-to-3D: attach a reference image via CDP ──────────────────
+
+async function uploadImageToTripoWebPage(win, imagePath) {
+  // Step 1: try to reveal the file input by clicking any upload-related area
+  const preClick = await win.webContents.executeJavaScript(`
+    (() => {
+      const visible = (el) => {
+        if (!el) return false
+        const s = window.getComputedStyle(el)
+        const r = el.getBoundingClientRect()
+        return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 4 && r.height > 4
+      }
+      // Direct visible file input
+      const direct = Array.from(document.querySelectorAll('input[type="file"]')).find(el =>
+        !el.accept || el.accept.includes('image') || el.accept === '*' || el.accept === 'image/*'
+      )
+      if (direct) { window.__tripoImgInput = direct; return 'found' }
+      // Upload trigger button
+      const trigger = Array.from(document.querySelectorAll('button,[role="button"],[class*="upload"],[class*="Upload"]'))
+        .filter(visible)
+        .find(el => /upload|image|photo|picture/i.test((el.innerText || el.textContent || el.className || '')))
+      if (trigger) { trigger.click(); return 'clicked' }
+      return 'none'
+    })()
+  `)
+
+  if (preClick === 'clicked') await wait(1200)
+
+  // Step 2: grab first available file input (may now be visible after click)
+  await win.webContents.executeJavaScript(`
+    (() => {
+      const inputs = Array.from(document.querySelectorAll('input[type="file"]'))
+      const pick = inputs.find(el => !el.accept || el.accept.includes('image') || el.accept === '*' || el.accept === 'image/*') || inputs[0]
+      if (pick) window.__tripoImgInput = pick
+    })()
+  `)
+
+  // Step 3: use CDP DOM.setFileInputFiles to inject the local file path
+  let dbg = null
+  try {
+    dbg = win.webContents.debugger
+    if (!dbg.isAttached()) dbg.attach('1.3')
+
+    const evalRes = await dbg.sendCommand('Runtime.evaluate', {
+      expression: 'window.__tripoImgInput',
+      returnByValue: false
+    })
+    if (!evalRes.result?.objectId) {
+      return { success: false, error: 'No image file input found on the Tripo page. Switch to the Image-to-3D tab manually and retry.' }
+    }
+
+    const nodeRes = await dbg.sendCommand('DOM.requestNode', { objectId: evalRes.result.objectId })
+    await dbg.sendCommand('DOM.setFileInputFiles', { files: [imagePath], nodeId: nodeRes.nodeId })
+
+    // Dispatch events so the framework reacts
+    await win.webContents.executeJavaScript(`
+      (() => {
+        const inp = window.__tripoImgInput
+        if (!inp) return
+        inp.dispatchEvent(new Event('change', { bubbles: true }))
+        inp.dispatchEvent(new Event('input', { bubbles: true }))
+      })()
+    `)
+
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: `Image injection failed: ${err.message}` }
+  } finally {
+    if (dbg?.isAttached()) {
+      try { dbg.detach() } catch { /* ignore */ }
+    }
+  }
+}
 
 ipcMain.handle('dialog:openVideo', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -1497,6 +1569,17 @@ ipcMain.handle('dialog:openGLTF', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
+// ── IPC: File Dialogs — Mesh import (accessories / environment) ──────────
+
+ipcMain.handle('dialog:openMesh', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import 3D Mesh',
+    filters: [{ name: '3D Mesh', extensions: ['glb', 'gltf', 'fbx', 'obj'] }],
+    properties: ['openFile']
+  })
+  return result.canceled ? null : result.filePaths[0]
+})
+
 // ── IPC: File Dialogs — Save Folder ─────────────────────────────────────
 
 ipcMain.handle('dialog:saveFolder', async (_, { title }) => {
@@ -1805,12 +1888,11 @@ ipcMain.handle(
     } = {}
   ) => {
     let win = null
+    const isImageMode = Boolean(imagePath && imagePath.trim())
+
     try {
-      if (!prompt.trim()) {
-        return { success: false, error: 'Prompt is required for Tripo website automation.' }
-      }
-      if (imagePath) {
-        return { success: false, error: 'Website automation currently supports text-to-3D prompts only.' }
+      if (!prompt.trim() && !isImageMode) {
+        return { success: false, error: 'A text prompt or a reference image is required.' }
       }
 
       const status = await inspectTripoWebSession(
@@ -1843,9 +1925,37 @@ ipcMain.handle(
       )
       if (!targetSurface.success) return { success: false, error: targetSurface.error }
 
-      event.sender.send('modeling:progress', { step: 'Submitting prompt in browser session…', pct: 24 })
-      const submit = await submitTripoWebPrompt(win, prompt.trim())
-      if (!submit.success) return { success: false, error: submit.error }
+      if (isImageMode) {
+        event.sender.send('modeling:progress', { step: 'Uploading reference image to Tripo…', pct: 22 })
+        const upload = await uploadImageToTripoWebPage(win, imagePath.trim())
+        if (!upload.success) return { success: false, error: upload.error }
+        await wait(1500)
+      }
+
+      if (prompt.trim()) {
+        event.sender.send('modeling:progress', { step: 'Submitting prompt in browser session…', pct: isImageMode ? 30 : 24 })
+        const submit = await submitTripoWebPrompt(win, prompt.trim())
+        if (!submit.success) return { success: false, error: submit.error }
+      } else {
+        // Image-only: click generate/create button without typing a prompt
+        event.sender.send('modeling:progress', { step: 'Triggering image-to-3D generation…', pct: 30 })
+        const triggered = await win.webContents.executeJavaScript(`
+          (() => {
+            const visible = (el) => {
+              if (!el) return false
+              const s = window.getComputedStyle(el)
+              const r = el.getBoundingClientRect()
+              return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 4 && r.height > 4
+            }
+            const textOf = (el) => (el?.innerText || el?.textContent || '').trim()
+            const buttons = Array.from(document.querySelectorAll('button,a,[role="button"]')).filter(visible)
+            const btn = buttons.find(el => /generate|create|start|run/i.test(textOf(el)) && !/log in|sign in|download|export/i.test(textOf(el)))
+            if (btn) { btn.click(); return { success: true, button: textOf(btn) } }
+            return { success: false, error: 'Could not find a Generate/Create button.' }
+          })()
+        `)
+        if (!triggered?.success) return { success: false, error: triggered?.error || 'Could not trigger generation.' }
+      }
 
       const downloadPromise = captureTripoWebDownload(win, outDir)
 
@@ -1866,7 +1976,7 @@ ipcMain.handle(
 
       const outputPath = await downloadPromise
       event.sender.send('modeling:progress', { step: 'Model ready!', pct: 100 })
-      return { success: true, outputPath, provider: 'tripo-web' }
+      return { success: true, outputPath, provider: isImageMode ? 'tripo-web-image' : 'tripo-web' }
     } catch (err) {
       return {
         success: false,

@@ -47,6 +47,7 @@ const api = {
 
   // Modeling pipeline
   openImage: () => ipcRenderer.invoke('dialog:openImage'),
+  openMesh: () => ipcRenderer.invoke('dialog:openMesh'),
   openGLTF: () => ipcRenderer.invoke('dialog:openGLTF'),
   saveFolder: (opts) => ipcRenderer.invoke('dialog:saveFolder', opts),
   listGeneratedModels: () => ipcRenderer.invoke('modeling:listGeneratedModels'),
