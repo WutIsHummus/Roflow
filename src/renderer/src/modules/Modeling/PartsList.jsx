@@ -8,6 +8,13 @@ const OPTIMIZE_PRESETS = [
   { label: 'Ultra',  ratio: 0.10, desc: '10% — maximum reduction, lowest poly' },
 ]
 
+const RETOPO_PRESETS = [
+  { label: 'Hi',   faces: 5000, desc: '5 000 faces — high detail, closer to source' },
+  { label: 'Mid',  faces: 2000, desc: '2 000 faces — balanced quad topology' },
+  { label: 'Lo',   faces: 800,  desc: '800 faces — game-ready low poly' },
+  { label: 'Tiny', faces: 300,  desc: '300 faces — minimal quad mesh' },
+]
+
 const ATTACH_POINTS = [
   // Head
   { id: 'HatAttachment',       label: '🎩 Hat (Top of Head)' },
@@ -76,6 +83,7 @@ export default function PartsList({
   onPartChange,
   onImportMesh,
   onOptimize,
+  onRetopo,
   showAttachPoint,
   tripoAssets = [],
   onAddTripoAsset,
@@ -345,6 +353,7 @@ export default function PartsList({
               onGenerate={() => onGenerate(part.id)}
               onPartChange={(ch) => onPartChange(part.id, ch)}
               onOptimize={(ratio) => onOptimize?.(part.id, ratio)}
+              onRetopo={(faces) => onRetopo?.(part.id, faces)}
               showAttachPoint={showAttachPoint}
             />
           ))
@@ -415,12 +424,13 @@ function TripoAssetCard({ asset, onAdd, actionLabel }) {
   )
 }
 
-function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange, onOptimize, showAttachPoint }) {
+function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange, onOptimize, onRetopo, showAttachPoint }) {
   const [focusPrompt, setFocusPrompt] = useState(false)
   const [focusName, setFocusName] = useState(false)
   const [imageMode, setImageMode] = useState(Boolean(part.imagePath))
   const [multiviewMode, setMultiviewMode] = useState(Boolean(part.multiviewImages?.some(Boolean)))
   const [optimizePresetIdx, setOptimizePresetIdx] = useState(1)
+  const [retopoFaceIdx, setRetopoFaceIdx] = useState(1)
 
   const MULTIVIEW_SLOTS = ['Front', 'Back', 'Left', 'Right']
 
@@ -804,6 +814,72 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
       {part.optimizeState === 'error' && part.optimizeError && (
         <div style={{ marginTop: 5, fontSize: 10, color: '#fca5a5', lineHeight: 1.5 }}>
           ⚠ {part.optimizeError}
+        </div>
+      )}
+
+      {/* Retopo row — shown when a mesh is ready */}
+      {part.status === 'done' && part.outputPath && (
+        <div style={{ display: 'flex', gap: 4, alignItems: 'stretch', marginTop: 6 }}>
+          <select
+            disabled={part.retopoState === 'retopoing'}
+            value={retopoFaceIdx}
+            onChange={(e) => setRetopoFaceIdx(Number(e.target.value))}
+            title={RETOPO_PRESETS[retopoFaceIdx].desc}
+            style={{
+              padding: '4px 6px',
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 600,
+              background: '#12151d',
+              color: '#7c8499',
+              border: '1px solid #1e2330',
+              cursor: part.retopoState === 'retopoing' ? 'wait' : 'pointer',
+              outline: 'none',
+            }}
+          >
+            {RETOPO_PRESETS.map((p, i) => (
+              <option key={p.label} value={i}>{p.label}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => onRetopo?.(RETOPO_PRESETS[retopoFaceIdx].faces)}
+            disabled={part.retopoState === 'retopoing'}
+            title={`Blender QuadriFlow — ${RETOPO_PRESETS[retopoFaceIdx].desc}`}
+            style={{
+              flex: 1,
+              padding: '9px 11px',
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 700,
+              background: part.retopoState === 'done' ? 'rgba(74,222,128,0.1)'
+                : part.retopoState === 'error' ? 'rgba(248,113,113,0.08)'
+                : part.retopoState === 'retopoing' ? 'rgba(96,165,250,0.08)'
+                : '#12151d',
+              color: part.retopoState === 'done' ? '#4ade80'
+                : part.retopoState === 'error' ? '#fca5a5'
+                : part.retopoState === 'retopoing' ? '#60a5fa'
+                : '#7c8499',
+              border: part.retopoState === 'done' ? '1px solid rgba(74,222,128,0.2)'
+                : part.retopoState === 'error' ? '1px solid rgba(248,113,113,0.2)'
+                : part.retopoState === 'retopoing' ? '1px solid rgba(96,165,250,0.2)'
+                : '1px solid #1e2330',
+              cursor: part.retopoState === 'retopoing' ? 'wait' : 'pointer',
+              whiteSpace: 'nowrap',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 4
+            }}
+          >
+            {part.retopoState === 'retopoing' ? <><SmallSpinIcon />Retopoing…</>
+              : part.retopoState === 'done' ? '✓ Retopo'
+              : '⬡ Retopo'}
+          </button>
+        </div>
+      )}
+      {part.retopoState === 'error' && part.retopoError && (
+        <div style={{ marginTop: 5, fontSize: 10, color: '#fca5a5', lineHeight: 1.5 }}>
+          ⚠ {part.retopoError}
         </div>
       )}
       <div style={{ marginTop: 6, fontSize: 10, color: '#3e4455' }}>

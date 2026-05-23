@@ -363,6 +363,48 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
     [tab]
   )
 
+  const retopoPart = useCallback(
+    async (id, targetFaces = 2000) => {
+      const setter = tab === 'character' ? setCharParts : setEnvParts
+      setter((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, retopoState: 'retopoing', retopoError: null } : p))
+      )
+      const part = (() => {
+        let found = null
+        setter((prev) => { found = prev.find((p) => p.id === id); return prev })
+        return found
+      })()
+      if (!part?.outputPath) {
+        setter((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, retopoState: 'error', retopoError: 'No output file to retopologize.' } : p))
+        )
+        return
+      }
+      const res = await window.api.retopologyMesh({ inputPath: part.outputPath, targetFaces })
+      if (!res.success) {
+        setter((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, retopoState: 'error', retopoError: res.error } : p))
+        )
+        return
+      }
+      const dataUrlRes = await window.api.readFileAsDataURL({ filePath: res.outputPath })
+      setter((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                outputPath: res.outputPath,
+                dataUrl: dataUrlRes.success ? dataUrlRes.dataUrl : p.dataUrl,
+                retopoState: 'done',
+                retopoError: null
+              }
+            : p
+        )
+      )
+    },
+    [tab]
+  )
+
   const exportScene = useCallback(async () => {
     const doneParts = envParts.filter((part) => part.status === 'done' && part.outputPath)
     if (!doneParts.length) return
@@ -735,6 +777,7 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
             onPartChange={updatePart}
             onImportMesh={importMeshAsPart}
             onOptimize={optimizePart}
+            onRetopo={retopoPart}
             showAttachPoint={tab === 'character'}
             tripoAssets={historyBrowserAssets}
             onAddTripoAsset={addGeneratedAssetToCurrentTab}

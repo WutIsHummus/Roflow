@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 const DEFAULT_WORKFLOW = {
-  provider: 'replicate',
+  provider: 'manus',
   assetType: 'shirt',
   designPrompt: '',
   colorPalette: '',

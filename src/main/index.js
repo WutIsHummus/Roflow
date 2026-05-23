@@ -1338,7 +1338,7 @@ ipcMain.handle('vfx:exportPackage', async (_, payload) => {
 // ── IPC: VFX — AI Recipe Generation (DeepSeek) ───────────────────────────
 
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions'
-const DEEPSEEK_MODEL = 'deepseek-chat'
+const DEEPSEEK_MODEL = 'deepseek-v4'
 
 ipcMain.handle('vfx:generateRecipe', async (_, payload) => {
   try {
@@ -2086,6 +2086,87 @@ ipcMain.handle(
     }
   }
 )
+
+// ── Blender path detection ────────────────────────────────────────────────
+
+function findBlenderExecutable(customPath) {
+  if (customPath && existsSync(customPath)) return customPath
+
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          ...['4.4', '4.3', '4.2', '4.1', '4.0', '3.6'].map(
+            (v) => `C:\\Program Files\\Blender Foundation\\Blender ${v}\\blender.exe`
+          ),
+          'blender.exe'
+        ]
+      : process.platform === 'darwin'
+        ? ['/Applications/Blender.app/Contents/MacOS/Blender', '/usr/local/bin/blender', 'blender']
+        : ['/usr/bin/blender', '/usr/local/bin/blender', 'blender']
+
+  return candidates.find((p) => existsSync(p)) || candidates[candidates.length - 1]
+}
+
+// ── Mesh retopology (Blender QuadriFlow) ─────────────────────────────────
+
+ipcMain.handle('mesh:retopologyBlender', async (event, { inputPath, targetFaces = 2000, blenderPath } = {}) => {
+  if (!inputPath || !existsSync(inputPath)) {
+    return { success: false, error: 'Input file not found.' }
+  }
+
+  const blender = findBlenderExecutable(blenderPath || loadConfig().blenderPath)
+  const scriptPath = join(getPythonDir(), 'retopo_blender.py')
+  const outputPath = inputPath.replace(/(\.[^.]+)$/, '_retopo.glb')
+
+  event.sender.send('mesh:retopologyProgress', { step: 'Starting Blender QuadriFlow retopology…', pct: 5 })
+
+  return new Promise((resolve) => {
+    let proc
+    try {
+      proc = spawn(blender, ['--background', '--python', scriptPath, '--', inputPath, outputPath, String(targetFaces)])
+    } catch (spawnErr) {
+      resolve({ success: false, error: `Could not start Blender: ${spawnErr.message}. Make sure Blender is installed.` })
+      return
+    }
+
+    let stderr = ''
+
+    proc.stdout.on('data', (data) => {
+      const msg = data.toString()
+      const progressMatch = msg.match(/PROGRESS:(\d+)/)
+      if (progressMatch) {
+        event.sender.send('mesh:retopologyProgress', { step: 'Remeshing with QuadriFlow…', pct: parseInt(progressMatch[1]) })
+      }
+      const errorMatch = msg.match(/ERROR:(.+)/)
+      if (errorMatch) {
+        event.sender.send('mesh:retopologyProgress', { step: `Blender: ${errorMatch[1].trim()}`, pct: 0 })
+      }
+    })
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString()
+    })
+
+    proc.on('close', (code) => {
+      if (code === 0 && existsSync(outputPath)) {
+        event.sender.send('mesh:retopologyProgress', { step: 'Retopology complete!', pct: 100 })
+        resolve({ success: true, outputPath })
+      } else {
+        const msg =
+          stderr.slice(0, 400) ||
+          `Blender exited with code ${code}. Ensure Blender (3.6+) is installed and accessible.`
+        resolve({ success: false, error: msg })
+      }
+    })
+
+    proc.on('error', (err) => {
+      resolve({
+        success: false,
+        error: `Could not start Blender: ${err.message}. Ensure Blender is installed and the path is correct.`
+      })
+    })
+  })
+})
 
 // ── Mesh optimization (polygon simplification + dedup/prune) ─────────────
 

@@ -54,6 +54,7 @@ const api = {
   saveGeneratedModel: (opts) => ipcRenderer.invoke('modeling:saveGeneratedModel', opts),
   readFileAsDataURL: (opts) => ipcRenderer.invoke('fs:readFileAsDataURL', opts),
   optimizeMesh: (opts) => ipcRenderer.invoke('mesh:optimize', opts),
+  retopologyMesh: (opts) => ipcRenderer.invoke('mesh:retopologyBlender', opts),
   onModelingProgress: (cb) => {
     const handler = (_, data) => cb(data)
     ipcRenderer.on('modeling:progress', handler)
@@ -63,6 +64,11 @@ const api = {
     const handler = (_, data) => cb(data)
     ipcRenderer.on('clothing:progress', handler)
     return () => ipcRenderer.removeListener('clothing:progress', handler)
+  },
+  onRetopologyProgress: (cb) => {
+    const handler = (_, data) => cb(data)
+    ipcRenderer.on('mesh:retopologyProgress', handler)
+    return () => ipcRenderer.removeListener('mesh:retopologyProgress', handler)
   },
 
   // Progress events
