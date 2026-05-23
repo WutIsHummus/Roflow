@@ -1175,6 +1175,120 @@ ipcMain.handle('vfx:exportPackage', async (_, payload) => {
   }
 })
 
+// ── IPC: VFX — AI Recipe Generation (DeepSeek) ───────────────────────────
+
+const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions'
+const DEEPSEEK_MODEL = 'deepseek-chat'
+
+ipcMain.handle('vfx:generateRecipe', async (_, payload) => {
+  try {
+    const { niagaraText, effectDescription, systemType, materialNotes, timingNotes, apiKey } = payload || {}
+
+    if (!apiKey) {
+      return { success: false, error: 'A DeepSeek API key is required. Add it in the VFX panel.' }
+    }
+
+    const userLines = [
+      effectDescription ? `Effect description: ${effectDescription}` : null,
+      `Niagara system type: ${systemType || 'Niagara'}`,
+      '',
+      'Niagara values / exported parameters:',
+      niagaraText || '(none provided)',
+      '',
+      materialNotes ? `Material / texture notes: ${materialNotes}` : null,
+      timingNotes ? `Timing notes: ${timingNotes}` : null
+    ]
+      .filter((line) => line !== null)
+      .join('\n')
+
+    const systemPrompt = `You are a Roblox VFX expert specialising in converting Unreal Engine Niagara systems into Roblox ParticleEmitter / Beam / Trail / BillboardGui setups. You always respond with valid JSON only — no markdown, no extra text.`
+
+    const userPrompt = `Analyse this Niagara VFX system and return a complete Roblox VFX recipe as a JSON object.
+
+${userLines}
+
+Return exactly this JSON structure (all fields required):
+{
+  "effectName": "short display name",
+  "effectType": "impact" | "projectile" | "aura" | "explosion" | "environment",
+  "sourceMode": "hybrid" | "unreal-rebuild" | "image-driven",
+  "targetPlatform": "roblox-desktop" | "roblox-mobile" | "cross-platform",
+  "performanceTarget": "low" | "medium" | "high",
+  "outputMode": "attachment" | "part" | "module-script",
+  "gameplayPurpose": "one sentence — what player action triggers this effect",
+  "visualDirection": "art direction and visual style notes",
+  "implementationNotes": "Roblox-specific constraints and approximation notes",
+  "layers": [
+    {
+      "name": "descriptive layer name",
+      "role": "what this layer contributes visually",
+      "layerType": "particle" | "beam" | "trail" | "billboard" | "ring",
+      "shape": "orb" | "spark" | "smoke" | "ring" | "slash" | "flare",
+      "textureHint": "sprite or flipbook description",
+      "color": "#rrggbb",
+      "secondaryColor": "#rrggbb",
+      "opacity": 0.8,
+      "lightEmission": 1.0,
+      "lightInfluence": 0.0,
+      "sizeMin": 0.3,
+      "sizeMax": 1.2,
+      "lifetimeMin": 0.1,
+      "lifetimeMax": 0.5,
+      "rate": 25,
+      "speedMin": 8.0,
+      "speedMax": 20.0,
+      "spread": 25,
+      "drag": 0.1,
+      "flipbookLayout": "None",
+      "flipbookMode": "None",
+      "notes": ""
+    }
+  ]
+}
+
+Include 2 to 4 layers. Choose values that are practical for Roblox and mobile-friendly where possible.`
+
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.4
+      })
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      return { success: false, error: `DeepSeek API error ${response.status}: ${errText.slice(0, 240)}` }
+    }
+
+    const data = await response.json()
+    const content = data?.choices?.[0]?.message?.content
+    if (!content) {
+      return { success: false, error: 'DeepSeek returned an empty response.' }
+    }
+
+    let recipe
+    try {
+      recipe = JSON.parse(content)
+    } catch {
+      return { success: false, error: 'DeepSeek response was not valid JSON.' }
+    }
+
+    return { success: true, recipe }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
 ipcMain.handle('modeling:listGeneratedModels', async () => {
   try {
     const items = [
