@@ -22,12 +22,18 @@ const api = {
   writeTextFile: (opts) => ipcRenderer.invoke('fs:writeTextFile', opts),
   exportVfxPackage: (opts) => ipcRenderer.invoke('vfx:exportPackage', opts),
   vfxGenerateRecipe: (opts) => ipcRenderer.invoke('vfx:generateRecipe', opts),
+  vfxGenerateParticleLogic: (opts) => ipcRenderer.invoke('vfx:generateParticleLogic', opts),
   sfxGenerateRecipe: (opts) => ipcRenderer.invoke('sfx:generateRecipe', opts),
   buildingGenerateRecipe: (opts) => ipcRenderer.invoke('building:generateRecipe', opts),
 
   // Config
   configGet: (key) => ipcRenderer.invoke('config:get', key),
   configSet: (key, value) => ipcRenderer.invoke('config:set', key, value),
+  onConfigUpdated: (cb) => {
+    const handler = (_, data) => cb(data)
+    ipcRenderer.on('config:updated', handler)
+    return () => ipcRenderer.removeListener('config:updated', handler)
+  },
 
   tripoWebOpenLogin: (opts) => ipcRenderer.invoke('tripo:webOpenLogin', opts),
   tripoWebOpenGenerate: (opts) => ipcRenderer.invoke('tripo:webOpenGenerate', opts),
@@ -35,16 +41,30 @@ const api = {
   tripoWebGenerate: (opts) => ipcRenderer.invoke('tripo:webGenerate', opts),
   tripoWebListHistory: (opts) => ipcRenderer.invoke('tripo:webListHistory', opts),
   tripoWebImportHistoryItem: (opts) => ipcRenderer.invoke('tripo:webImportHistoryItem', opts),
+  tripoListSyncedAssets: () => ipcRenderer.invoke('tripo:listSyncedAssets'),
+  tripoGetAssetById: (opts) => ipcRenderer.invoke('tripo:getAssetById', opts),
+  tripoImportSyncedAssetById: (opts) => ipcRenderer.invoke('tripo:importSyncedAssetById', opts),
   manusWebOpenLogin: (opts) => ipcRenderer.invoke('manus:webOpenLogin', opts),
   manusWebOpenWorkspace: (opts) => ipcRenderer.invoke('manus:webOpenWorkspace', opts),
   manusWebSessionStatus: (opts) => ipcRenderer.invoke('manus:webSessionStatus', opts),
   chatgptWebOpenLogin: (opts) => ipcRenderer.invoke('chatgpt:webOpenLogin', opts),
   chatgptWebOpenWorkspace: (opts) => ipcRenderer.invoke('chatgpt:webOpenWorkspace', opts),
   chatgptWebSessionStatus: (opts) => ipcRenderer.invoke('chatgpt:webSessionStatus', opts),
+  elevenLabsWebOpenLogin: (opts) => ipcRenderer.invoke('elevenlabs:webOpenLogin', opts),
+  elevenLabsWebOpenImageStudio: (opts) => ipcRenderer.invoke('elevenlabs:webOpenImageStudio', opts),
+  elevenLabsWebSessionStatus: (opts) => ipcRenderer.invoke('elevenlabs:webSessionStatus', opts),
+  elevenLabsWebGenerateImage: (opts) => ipcRenderer.invoke('elevenlabs:webGenerateImage', opts),
 
   // Hosted image generation
   replicateGenerateClothing: (opts) => ipcRenderer.invoke('replicate:generateClothing', opts),
   clothingGenerateGptImage: (opts) => ipcRenderer.invoke('clothing:generateGptImage', opts),
+
+  // SFX / audio generation
+  elevenLabsValidateKey: (opts) => ipcRenderer.invoke('elevenlabs:validateKey', opts),
+  elevenLabsListVoices: (opts) => ipcRenderer.invoke('elevenlabs:listVoices', opts),
+  sfxGenerateElevenLabs: (opts) => ipcRenderer.invoke('sfx:generateElevenLabs', opts),
+  sfxCheckStableAudio: () => ipcRenderer.invoke('sfx:checkStableAudio'),
+  sfxGenerateStableAudio: (opts) => ipcRenderer.invoke('sfx:generateStableAudio', opts),
 
   // Modeling pipeline
   openImage: () => ipcRenderer.invoke('dialog:openImage'),
@@ -70,6 +90,16 @@ const api = {
     const handler = (_, data) => cb(data)
     ipcRenderer.on('mesh:retopologyProgress', handler)
     return () => ipcRenderer.removeListener('mesh:retopologyProgress', handler)
+  },
+  onVfxProgress: (cb) => {
+    const handler = (_, data) => cb(data)
+    ipcRenderer.on('vfx:progress', handler)
+    return () => ipcRenderer.removeListener('vfx:progress', handler)
+  },
+  onSfxProgress: (cb) => {
+    const handler = (_, data) => cb(data)
+    ipcRenderer.on('sfx:progress', handler)
+    return () => ipcRenderer.removeListener('sfx:progress', handler)
   },
 
   // Progress events

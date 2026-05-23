@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+﻿/* eslint-disable react/prop-types */
 import { useState, useEffect, useCallback } from 'react'
 
 const S = {
@@ -66,12 +66,12 @@ export default function BuildingModule() {
     if (!result?.success) { setError(result?.error || 'Generation failed.'); return }
     setRecipe(result.recipe)
     setTripoProgress({})
-    setNotice(`Recipe generated — "${result.recipe.buildingName}" with ${result.recipe.components?.length || 0} components.`)
+    setNotice(`Recipe generated ΓÇö "${result.recipe.buildingName}" with ${result.recipe.components?.length || 0} components.`)
   }, [apiKey, description, gameType, style])
 
   const generateComponent = useCallback(async (component, index) => {
     const key = `comp_${index}`
-    setTripoProgress((prev) => ({ ...prev, [key]: { step: 'Starting Tripo…', pct: 0 } }))
+    setTripoProgress((prev) => ({ ...prev, [key]: { step: 'Starting TripoΓÇª', pct: 0 } }))
 
     const tripoConfig = await Promise.all([
       window.api.configGet('tripoWebBaseUrl'),
@@ -110,7 +110,7 @@ export default function BuildingModule() {
     <div style={S.page}>
       <div style={S.header}>
         <h1 style={S.title}>Building Generator</h1>
-        <p style={S.subtitle}>Describe a Roblox building — DeepSeek breaks it into 3D components, each ready for Tripo generation.</p>
+        <p style={S.subtitle}>Describe a Roblox building ΓÇö DeepSeek breaks it into 3D components, each ready for Tripo generation.</p>
       </div>
 
       <div style={S.body}>
@@ -177,7 +177,7 @@ export default function BuildingModule() {
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-…"
+                  placeholder="sk-ΓÇª"
                 />
               </div>
 
@@ -186,7 +186,7 @@ export default function BuildingModule() {
                 disabled={busy === 'generate'}
                 onClick={generate}
               >
-                {busy === 'generate' ? 'Generating…' : 'Generate Building Recipe'}
+                {busy === 'generate' ? 'GeneratingΓÇª' : 'Generate Building Recipe'}
               </button>
             </div>
           </div>
@@ -198,7 +198,7 @@ export default function BuildingModule() {
 
           {!recipe && busy !== 'generate' && (
             <div style={{ ...S.card, color: '#555b6e', fontSize: 13, lineHeight: 1.7, padding: 20 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#2e3340', marginBottom: 8 }}>🏗️ Waiting for input</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#2e3340', marginBottom: 8 }}>≡ƒÅù∩╕Å Waiting for input</div>
               Describe your building on the left and hit <strong style={{ color: '#7c3aed' }}>Generate Building Recipe</strong>. DeepSeek will return:
               <ul style={{ marginTop: 8, paddingLeft: 20, lineHeight: 2 }}>
                 <li>Structural component breakdown</li>
@@ -230,7 +230,7 @@ export default function BuildingModule() {
               {Array.isArray(recipe.components) && recipe.components.length > 0 && (
                 <div style={S.card}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 12 }}>
-                    Components ({recipe.components.length}) — Generate each with Tripo
+                    Components ({recipe.components.length}) ΓÇö Generate each with Tripo
                   </div>
                   <div style={{ display: 'grid', gap: 10 }}>
                     {recipe.components
@@ -273,7 +273,7 @@ export default function BuildingModule() {
                                   disabled={busy === key}
                                   onClick={() => generateComponent(comp, i)}
                                 >
-                                  {busy === key ? 'Generating…' : 'Generate with Tripo'}
+                                  {busy === key ? 'GeneratingΓÇª' : 'Generate with Tripo'}
                                 </button>
                                 <button
                                   style={{ ...S.button, padding: '6px 12px', fontSize: 11 }}

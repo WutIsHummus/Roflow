@@ -1,5 +1,5 @@
 appId: com.electron.app
-productName: ai-game-dev-hub
+productName: RoFlow
 directories:
   buildResources: build
 files:

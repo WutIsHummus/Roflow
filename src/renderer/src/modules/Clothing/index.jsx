@@ -1,8 +1,23 @@
 /* eslint-disable react/prop-types */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { CONFIG_KEYS } from '../../../../shared/configKeys.js'
+import { useConfigKey } from '../../hooks/useConfigKey.js'
+import {
+  Shirt,
+  Settings,
+  Sparkles,
+  Download,
+  Copy,
+  Compass,
+  Sparkle,
+  Plus,
+  Trash2,
+  FolderDown,
+  Upload
+} from 'lucide-react'
 
 const DEFAULT_WORKFLOW = {
-  provider: 'manus',
+  provider: 'replicate',
   assetType: 'shirt',
   designPrompt: '',
   colorPalette: '',
@@ -25,11 +40,6 @@ const PROVIDERS = {
     label: 'Replicate FLUX',
     accent: '#a78bfa',
     generateLabel: 'Generate with Replicate'
-  },
-  'gpt-image': {
-    label: 'GPT Image 2',
-    accent: '#f97316',
-    generateLabel: 'Generate with GPT Image 2'
   },
   manus: {
     label: 'Manus',
@@ -144,6 +154,15 @@ function buildPromptPack(workflow) {
 
   const finalPrompt = `${hardRequirements}\n\n${designBrief}`
 
+  const workflowNotes = [
+    'Workflow',
+    '1. Start with the built-in Roblox shirt template or attach your own template PNG.',
+    '2. Write the clothing direction in plain language.',
+    '3. Generate with Replicate FLUX Kontext Pro so it fills the UV panels with clothing artwork.',
+    '4. Inspect seams and clean up any edge issues in an editor before upload.',
+    '5. Upload the final PNG to Roblox as classic clothing.'
+  ].join('\n')
+
   const exportText = [
     'Roblox Classic Clothing Prompt Pack',
     '',
@@ -160,7 +179,9 @@ function buildPromptPack(workflow) {
     negativePrompt,
     '',
     'Final Prompt',
-    finalPrompt
+    finalPrompt,
+    '',
+    workflowNotes
   ]
     .filter(Boolean)
     .join('\n')
@@ -169,86 +190,137 @@ function buildPromptPack(workflow) {
     hardRequirements,
     negativePrompt,
     finalPrompt,
-    exportText
+    exportText,
+    workflowNotes
   }
 }
 
 const styles = {
-  page: { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f1116' },
-  header: { padding: '20px 24px 0', borderBottom: '1px solid #1e2330', flexShrink: 0 },
-  title: { fontSize: 18, fontWeight: 700, color: '#eef0f6', margin: 0 },
-  subtitle: { fontSize: 13, color: '#555b6e', marginTop: 4, lineHeight: 1.6 },
-  body: { flex: 1, display: 'grid', gridTemplateColumns: '360px 1fr 360px', minHeight: 0 },
-  rail: { borderRight: '1px solid #1e2330', padding: 20, overflowY: 'auto' },
-  center: { padding: 24, overflowY: 'auto' },
-  pack: { borderLeft: '1px solid #1e2330', padding: 20, overflowY: 'auto' },
+  page: { 
+    display: 'flex', 
+    flexDirection: 'column', 
+    height: '100%', 
+    background: 'radial-gradient(circle at top left, rgba(20, 24, 33, 0.4), rgba(10, 11, 15, 0.6))',
+    backdropFilter: 'blur(20px)',
+    position: 'relative',
+    overflow: 'hidden'
+  },
+  header: { 
+    padding: '24px 24px 12px', 
+    borderBottom: '1px solid rgba(255,255,255,0.05)', 
+    background: 'rgba(0,0,0,0.15)',
+    flexShrink: 0 
+  },
+  title: { 
+    fontSize: 20, 
+    fontWeight: 800, 
+    letterSpacing: '-0.02em',
+    color: '#f1f5f9', 
+    margin: 0 
+  },
+  subtitle: { 
+    fontSize: 12.5, 
+    color: '#94a3b8', 
+    marginTop: 6, 
+    lineHeight: 1.6,
+    fontWeight: 500
+  },
+  body: { 
+    flex: 1, 
+    display: 'grid', 
+    gridTemplateColumns: '360px 1fr 360px', 
+    minHeight: 0 
+  },
+  rail: { 
+    borderRight: '1px solid rgba(255,255,255,0.05)', 
+    padding: '20px 16px', 
+    overflowY: 'auto',
+    background: 'rgba(0,0,0,0.08)'
+  },
+  center: { 
+    padding: 24, 
+    overflowY: 'auto' 
+  },
+  pack: { 
+    borderLeft: '1px solid rgba(255,255,255,0.05)', 
+    padding: '20px 16px', 
+    overflowY: 'auto',
+    background: 'rgba(0,0,0,0.08)'
+  },
   card: {
-    background: '#141821',
-    border: '1px solid #202533',
-    borderRadius: 12,
-    padding: 14
+    background: 'rgba(16, 19, 28, 0.4)',
+    backdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    borderRadius: 14,
+    padding: 16,
+    boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
   },
   label: {
     display: 'block',
-    fontSize: 11,
-    fontWeight: 700,
+    fontSize: 10,
+    fontWeight: 800,
     textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    color: '#7c8499',
-    marginBottom: 7
+    letterSpacing: '0.08em',
+    color: '#64748b',
+    marginBottom: 8
   },
   input: {
     width: '100%',
-    background: '#0d0f14',
-    border: '1px solid #252a36',
+    background: 'rgba(9, 10, 15, 0.6)',
+    border: '1px solid rgba(255,255,255,0.05)',
     borderRadius: 10,
-    padding: '10px 12px',
+    padding: '10px 14px',
     fontSize: 12,
-    color: '#eef0f6',
+    fontWeight: 500,
+    color: '#e2e8f0',
     outline: 'none',
     boxSizing: 'border-box',
-    fontFamily: 'inherit'
+    fontFamily: 'inherit',
+    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
   },
   textarea: {
     width: '100%',
-    background: '#0d0f14',
-    border: '1px solid #252a36',
+    background: 'rgba(9, 10, 15, 0.6)',
+    border: '1px solid rgba(255,255,255,0.05)',
     borderRadius: 10,
-    padding: '10px 12px',
+    padding: '10px 14px',
     fontSize: 12,
-    color: '#c4cad8',
+    fontWeight: 500,
+    color: '#cbd5e1',
     outline: 'none',
     boxSizing: 'border-box',
     fontFamily: 'inherit',
     resize: 'vertical',
-    lineHeight: 1.6
+    lineHeight: 1.6,
+    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
   },
   button: {
-    border: '1px solid #2a3040',
+    border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: 10,
-    padding: '9px 12px',
+    padding: '9px 14px',
     fontSize: 12,
     fontWeight: 700,
-    background: '#171b24',
-    color: '#c4cad8',
-    cursor: 'pointer'
+    background: 'rgba(30, 41, 59, 0.4)',
+    color: '#94a3b8',
+    cursor: 'pointer',
+    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
   },
   primaryButton: {
     border: 'none',
     borderRadius: 10,
-    padding: '10px 12px',
+    padding: '10px 14px',
     fontSize: 12,
     fontWeight: 700,
-    background: 'linear-gradient(135deg,#7c3aed,#a78bfa)',
-    color: '#fff',
-    cursor: 'pointer'
+    background: 'rgba(255, 255, 255, 0.9)',
+    color: '#0c0e17',
+    cursor: 'pointer',
+    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
   }
 }
 
-export default function ClothingModule({ workflowState, setWorkflowState }) {
+export default function ClothingModule({ workflowState, setWorkflowState, onChangeModule }) {
   const [workflow, setWorkflow] = useState(() => ({ ...DEFAULT_WORKFLOW, ...(workflowState?.clothingWorkflow || {}) }))
-  const [replicateToken, setReplicateToken] = useState('')
-  const [azureGithubToken, setAzureGithubToken] = useState('')
+  const replicateToken = useConfigKey(CONFIG_KEYS.REPLICATE_API_TOKEN)
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState('')
   const [progress, setProgress] = useState(null)
@@ -257,6 +329,8 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
     () => !window.api?.configGet
   )
   const [providerSessionState, setProviderSessionState] = useState(DEFAULT_PROVIDER_SESSION_STATE)
+
+  const promptPack = useMemo(() => buildPromptPack(workflow), [workflow])
 
   useEffect(() => {
     if (workflowState?.clothingWorkflow?.templateDataUrl) return
@@ -289,13 +363,20 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
   }, [workflowState?.clothingWorkflow?.templateDataUrl])
 
   useEffect(() => {
-    window.api.configGet('replicateApiToken').then((value) => {
-      if (value) setReplicateToken(value)
-    })
-    window.api.configGet('githubAzureToken').then((value) => {
-      if (value) setAzureGithubToken(value)
-    })
-  }, [])
+    if (!workflow.resultPath || workflow.resultDataUrl) return undefined
+    let cancelled = false
+
+    async function hydrateResultTexture() {
+      const result = await window.api.readFileAsDataURL({ filePath: workflow.resultPath })
+      if (cancelled || !result.success) return
+      setWorkflow((prev) => ({ ...prev, resultDataUrl: result.dataUrl }))
+    }
+
+    hydrateResultTexture().catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [workflow.resultPath, workflow.resultDataUrl])
 
   useEffect(() => {
     if (!setWorkflowState) return
@@ -319,7 +400,7 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
     if (!window.api?.configGet) return undefined
 
     window.api
-      .configGet('clothingProviderWebConfig')
+      .configGet(CONFIG_KEYS.CLOTHING_PROVIDER_WEB_CONFIG)
       .then((saved) => {
         if (!active) return
         if (saved && typeof saved === 'object') {
@@ -335,13 +416,6 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
       active = false
     }
   }, [])
-
-  useEffect(() => {
-    if (!providerWebConfigLoaded || !window.api?.configSet) return
-    window.api.configSet('clothingProviderWebConfig', providerWebConfig)
-  }, [providerWebConfig, providerWebConfigLoaded])
-
-  const promptPack = useMemo(() => buildPromptPack(workflow), [workflow])
 
   const updateWorkflow = useCallback((changes) => {
     setWorkflow((prev) => ({ ...prev, ...changes }))
@@ -400,23 +474,6 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
     }, 0)
     return () => window.clearTimeout(timeout)
   }, [providerWebConfigLoaded, refreshProviderStatus])
-
-  const openProviderLogin = useCallback(
-    async (providerId) => {
-      const options = getProviderWebOptions(providerId)
-      const result =
-        providerId === 'manus'
-          ? await window.api.manusWebOpenLogin(options)
-          : await window.api.chatgptWebOpenLogin(options)
-
-      if (!result?.success) {
-        setNotice(result?.error || 'Could not open provider login.')
-        return
-      }
-      setNotice(providerId === 'manus' ? 'Opened Manus login.' : 'Opened ChatGPT login.')
-    },
-    [getProviderWebOptions]
-  )
 
   const openProviderWorkspace = useCallback(
     async (providerId) => {
@@ -481,57 +538,35 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
     setNotice('Template removed.')
   }, [updateWorkflow])
 
-  const saveToken = useCallback(async () => {
-    await window.api.configSet('replicateApiToken', replicateToken.trim())
-    setNotice('Replicate token saved.')
-  }, [replicateToken])
-
-  const saveAzureToken = useCallback(async () => {
-    await window.api.configSet('githubAzureToken', azureGithubToken.trim())
-    setNotice('GitHub / Azure token saved.')
-  }, [azureGithubToken])
-
-  const generateWithGptImage = useCallback(async () => {
-    if (!azureGithubToken.trim()) {
-      setNotice('Add your GitHub / Azure API token first.')
+  const importClothingTexture = useCallback(async () => {
+    setBusy('import')
+    const filePath = await window.api.openImage()
+    if (!filePath) {
+      setBusy('')
       return
     }
-    if (!workflow.templateImagePath) {
-      setNotice('Attach a Roblox clothing template image first.')
-      return
-    }
-    if (!workflow.designPrompt.trim()) {
-      setNotice('Describe the clothing design first.')
-      return
-    }
-
-    setBusy('generate')
-    setProgress({ step: 'Preparing GPT Image request…', pct: 5 })
-
-    const result = await window.api.clothingGenerateGptImage({
-      apiToken: azureGithubToken.trim(),
-      prompt: promptPack.finalPrompt,
-      inputImagePath: workflow.templateImagePath !== 'Built-in Roblox shirt template' ? workflow.templateImagePath : null,
-      inputImageDataUrl: workflow.templateDataUrl
-    })
-
+    const result = await window.api.readFileAsDataURL({ filePath })
     setBusy('')
-
-    if (!result?.success) {
-      setProgress(null)
-      setNotice(result?.error || 'GPT Image generation failed.')
+    if (!result.success) {
+      setNotice(result.error || 'Could not load clothing image.')
       return
     }
-
-    const dataUrlResult = await window.api.readFileAsDataURL({ filePath: result.outputPath })
-    setProgress(null)
     updateWorkflow({
-      resultPath: result.outputPath,
-      resultDataUrl: dataUrlResult.success ? dataUrlResult.dataUrl : null,
-      lastPrompt: promptPack.finalPrompt
+      resultPath: filePath,
+      resultDataUrl: result.dataUrl,
+      lastPrompt: ''
     })
-    setNotice('Classic clothing texture generated.')
-  }, [azureGithubToken, promptPack.finalPrompt, updateWorkflow, workflow.designPrompt, workflow.templateDataUrl, workflow.templateImagePath])
+    setNotice('Clothing texture imported.')
+  }, [updateWorkflow])
+
+  const removeResult = useCallback(() => {
+    updateWorkflow({
+      resultPath: null,
+      resultDataUrl: null,
+      lastPrompt: ''
+    })
+    setNotice('Result cleared.')
+  }, [updateWorkflow])
 
   const exportPromptPack = useCallback(async () => {
     const filePath = await window.api.saveFile({
@@ -561,13 +596,13 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
     })
     if (!filePath) return
     await window.api.copyFile({ src: workflow.resultPath, dest: filePath })
-    setNotice('Generated texture saved.')
+    setNotice('Clothing texture saved.')
     window.api.openPath(filePath)
   }, [workflow.assetType, workflow.resultPath])
 
   const generateTexture = useCallback(async () => {
     if (!replicateToken.trim()) {
-      setNotice('Add your Replicate API token first.')
+      setNotice('Add your Replicate API token in Settings first.')
       return
     }
     if (!workflow.templateImagePath) {
@@ -613,95 +648,95 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
   }, [promptPack.finalPrompt, replicateToken, updateWorkflow, workflow.designPrompt, workflow.seed, workflow.templateDataUrl, workflow.templateImagePath])
 
   const selectedProvider = PROVIDERS[workflow.provider] || PROVIDERS.replicate
-  const currentProviderStatus =
-    providerSessionState[workflow.provider] || DEFAULT_PROVIDER_SESSION_STATE.manus
-  const providerStatusLabel = currentProviderStatus.loading
-    ? 'Checking...'
-    : currentProviderStatus.connected
-      ? 'Connected'
-      : currentProviderStatus.loginDetected
-        ? 'Login required'
-        : currentProviderStatus.checked
-          ? 'Not connected'
-          : 'Not checked'
 
-  const handleGenerate =
-    workflow.provider === 'replicate'
-      ? generateTexture
-      : workflow.provider === 'gpt-image'
-        ? generateWithGptImage
-        : generateWithWebProvider
+  const handleGenerate = workflow.provider === 'replicate' ? generateTexture : generateWithWebProvider
 
   return (
     <div style={styles.page}>
       <div style={styles.header}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 16,
-            marginBottom: 16
-          }}
-        >
+        <div className="flex justify-between items-start gap-4 mb-4">
           <div>
-            <h1 style={styles.title}>Classic Clothing Studio</h1>
-            <p style={styles.subtitle}>
+            <h1 style={styles.title} className="text-xl font-extrabold tracking-tight text-slate-100 flex items-center gap-2">
+              <Shirt size={20} className="text-purple-400" /> Classic Clothing Studio
+            </h1>
+            <p style={styles.subtitle} className="text-xs text-slate-400 mt-1 font-medium">
               Generate Roblox classic clothing by filling the Roblox UV template panels.
               Choose a generation provider below.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button style={styles.button} onClick={exportPromptPack}>
-              Export Prompt Pack
+          <div className="flex gap-2 flex-wrap">
+            <button
+              className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
+              onClick={() => onChangeModule?.('settings')}
+            >
+              <Settings size={13} /> Settings
             </button>
-            <button style={styles.primaryButton} onClick={handleGenerate} disabled={busy === 'generate'}>
-              {busy === 'generate' ? 'Generating…' : selectedProvider.generateLabel}
+            <button
+              className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
+              onClick={importClothingTexture}
+              disabled={busy === 'import'}
+            >
+              <Upload size={13} /> {busy === 'import' ? 'Importing…' : 'Import PNG'}
+            </button>
+            <button 
+              className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
+              onClick={exportPromptPack}
+            >
+              <FolderDown size={13} /> Export Prompt Pack
+            </button>
+            <button 
+              className="px-4 py-2 text-xs font-bold rounded-lg bg-white text-slate-950 hover:bg-white/90 shadow-sm transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+              onClick={handleGenerate} 
+              disabled={busy === 'generate'}
+            >
+              <Sparkles size={13} /> {busy === 'generate' ? 'Generating…' : selectedProvider.generateLabel}
             </button>
           </div>
         </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 10,
-            marginBottom: 10
-          }}
-        >
+        <div className="grid grid-cols-3 gap-3 mb-3">
           {Object.entries(PROVIDERS).map(([id, provider]) => {
             const active = workflow.provider === id
             const status = id !== 'replicate' ? providerSessionState[id] : null
+            
+            let activeClass = ""
+            let borderStyle = "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.08] hover:border-white/[0.12]"
+            if (active) {
+              if (id === 'replicate') {
+                activeClass = "bg-gradient-to-br from-violet-950/40 to-fuchsia-950/30 border-violet-500/50 text-violet-200 shadow-[0_0_15px_rgba(167,139,250,0.25)] font-bold"
+                borderStyle = ""
+              } else if (id === 'manus') {
+                activeClass = "bg-gradient-to-br from-sky-950/40 to-blue-950/30 border-sky-500/50 text-sky-200 shadow-[0_0_15px_rgba(56,189,248,0.25)] font-bold"
+                borderStyle = ""
+              } else if (id === 'chatgpt-image') {
+                activeClass = "bg-gradient-to-br from-emerald-950/40 to-teal-950/30 border-emerald-500/50 text-emerald-200 shadow-[0_0_15px_rgba(52,211,153,0.25)] font-bold"
+                borderStyle = ""
+              }
+            }
+
             return (
               <button
                 key={id}
                 onClick={() => updateWorkflow({ provider: id })}
-                style={{
-                  ...styles.card,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  border: active ? `1px solid ${provider.accent}` : '1px solid #202533'
-                }}
+                className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${borderStyle} ${activeClass}`}
               >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 8
-                  }}
-                >
-                  <strong style={{ color: '#eef0f6', fontSize: 14 }}>{provider.label}</strong>
+                <div className="flex justify-between items-center gap-2">
+                  <strong className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                    {id === 'replicate' && <Sparkles size={13} className="text-violet-400" />}
+                    {id === 'manus' && <Compass size={13} className="text-sky-400" />}
+                    {id === 'chatgpt-image' && <Sparkle size={13} className="text-emerald-400" />}
+                    {provider.label}
+                  </strong>
                   <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: status?.connected ? '#4ade80' : '#6b7280',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.05em'
-                    }}
+                    className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                      status?.connected 
+                        ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300' 
+                        : id === 'replicate' 
+                          ? 'bg-violet-500/10 border-violet-500/25 text-violet-300'
+                          : 'bg-slate-800 border-slate-700 text-slate-500'
+                    }`}
                   >
-                    {status ? (status.connected ? 'Connected' : 'Not connected') : 'API'}
+                    {status ? (status.connected ? 'Connected' : 'Offline') : 'API'}
                   </span>
                 </div>
               </button>
@@ -710,43 +745,26 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
         </div>
 
         {notice && (
-          <div
-            style={{
-              marginBottom: 14,
-              padding: '10px 12px',
-              borderRadius: 10,
-              background: 'rgba(124,58,237,0.1)',
-              border: '1px solid rgba(124,58,237,0.18)',
-              color: '#c4b5fd',
-              fontSize: 12
-            }}
-          >
-            {notice}
+          <div className="mb-3.5 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-medium animate-fadeIn flex items-center gap-1.5">
+            <Sparkles size={13} className="text-purple-300" /> <span>{notice}</span>
           </div>
         )}
 
         {progress && (
-          <div style={{ marginBottom: 14 }}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: 11,
-                color: '#9499a8',
-                marginBottom: 4
-              }}
-            >
-              <span>{progress.step}</span>
+          <div className="mb-3.5 bg-purple-500/5 border border-purple-500/15 p-2.5 rounded-lg">
+            <div className="flex justify-between text-xs font-semibold text-purple-300 mb-1.5 tracking-wide">
+              <span className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_#c084fc]"></span>
+                {progress.step}
+              </span>
               <span>{progress.pct}%</span>
             </div>
-            <div style={{ height: 3, background: '#1e2330', borderRadius: 2 }}>
+            <div className="h-1 bg-white/5 rounded-full overflow-hidden">
               <div
+                className="h-full rounded-full bg-gradient-to-r from-purple-500 via-fuchsia-500 to-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.5)]"
                 style={{
-                  height: '100%',
-                  borderRadius: 2,
-                  background: 'linear-gradient(90deg,#7c3aed,#a78bfa)',
                   width: `${progress.pct}%`,
-                  transition: 'width .3s'
+                  transition: 'width .3s cubic-bezier(0.4, 0, 0.2, 1)'
                 }}
               />
             </div>
@@ -756,135 +774,22 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
 
       <div style={styles.body}>
         <div style={styles.rail}>
-          {workflow.provider === 'replicate' && (
-            <div style={{ ...styles.card, marginBottom: 14 }}>
-              <label style={styles.label}>Replicate API Token</label>
-              <input
-                value={replicateToken}
-                onChange={(event) => setReplicateToken(event.target.value)}
-                placeholder="r8_..."
-                type="password"
-                style={styles.input}
-              />
-              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                <button style={styles.primaryButton} onClick={saveToken}>
-                  Save Token
-                </button>
-                <button style={styles.button} onClick={() => window.api.openExternalUrl('https://replicate.com/account/api-tokens')}>
-                  Get Token
-                </button>
-              </div>
-            </div>
-          )}
-
-          {workflow.provider === 'gpt-image' && (
-            <div style={{ ...styles.card, marginBottom: 14 }}>
-              <label style={styles.label}>GitHub / Azure API Token</label>
-              <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.6, marginBottom: 10 }}>
-                Uses GPT Image 2 (<code style={{ color: '#f97316' }}>gpt-image-1</code>) via GitHub
-                Models or Azure AI. Paste your GitHub Personal Access Token or Azure API key.
-              </div>
-              <input
-                value={azureGithubToken}
-                onChange={(e) => setAzureGithubToken(e.target.value)}
-                placeholder="github_pat_... or Azure key"
-                type="password"
-                style={styles.input}
-              />
-              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                <button style={styles.primaryButton} onClick={saveAzureToken}>
-                  Save Token
-                </button>
-                <button
-                  style={styles.button}
-                  onClick={() => window.api.openExternalUrl('https://github.com/settings/tokens')}
-                >
-                  GitHub PAT
-                </button>
-              </div>
-            </div>
-          )}
-
-          {workflow.provider !== 'replicate' && workflow.provider !== 'gpt-image' && (
-            <div style={{ ...styles.card, marginBottom: 14 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 10
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 11, color: '#7c8499', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                    Browser session
-                  </div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: selectedProvider.accent, marginTop: 8 }}>
-                    {selectedProvider.label}
-                  </div>
-                </div>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: currentProviderStatus.connected
-                      ? '#4ade80'
-                      : currentProviderStatus.loginDetected
-                        ? '#f59e0b'
-                        : '#94a3b8',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}
-                >
-                  {providerStatusLabel}
-                </span>
-              </div>
-              {currentProviderStatus.error && (
-                <div
-                  style={{
-                    marginTop: 10,
-                    padding: '8px 10px',
-                    borderRadius: 10,
-                    background: 'rgba(248,113,113,0.08)',
-                    border: '1px solid rgba(248,113,113,0.18)',
-                    color: '#fca5a5',
-                    fontSize: 11,
-                    lineHeight: 1.6
-                  }}
-                >
-                  {currentProviderStatus.error}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-                <button style={styles.button} onClick={() => openProviderLogin(workflow.provider)}>
-                  Connect
-                </button>
-                <button style={styles.button} onClick={() => openProviderWorkspace(workflow.provider)}>
-                  Workspace
-                </button>
-                <button style={styles.button} onClick={() => refreshProviderStatus(workflow.provider)}>
-                  Refresh
-                </button>
-              </div>
-            </div>
-          )}
-
           <div style={{ ...styles.card, marginBottom: 14 }}>
             <label style={styles.label}>Asset Type</label>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className="flex gap-2">
               {['shirt', 'pants'].map((type) => {
                 const active = workflow.assetType === type
                 return (
                   <button
                     key={type}
-                    style={{
-                      ...styles.button,
-                      flex: 1,
-                      border: active ? '1px solid #7c3aed' : styles.button.border,
-                      color: active ? '#c4b5fd' : styles.button.color
-                    }}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5 ${
+                      active 
+                        ? 'bg-purple-500/10 border-purple-500/30 text-purple-300' 
+                        : 'border-white/[0.08] bg-white/[0.04] text-slate-400 hover:text-slate-200 hover:border-white/[0.15]'
+                    }`}
                     onClick={() => updateWorkflow({ assetType: type })}
                   >
+                    {type === 'shirt' && <Shirt size={12} />}
                     {type === 'shirt' ? 'Classic Shirt' : 'Classic Pants'}
                   </button>
                 )
@@ -893,31 +798,31 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
           </div>
 
           <div style={styles.card}>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: '#eef0f6',
-                marginBottom: 8
-              }}
-            >
+            <div className="text-xs font-bold text-slate-200 mb-1.5">
               Template Input
             </div>
-            <div style={{ fontSize: 12, color: '#8b93a7', lineHeight: 1.6, marginBottom: 12 }}>
+            <div className="text-[11px] text-slate-400 leading-relaxed mb-3.5">
               The built-in shirt template is already loaded. Attach a different template only if you
               want to replace it.
             </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-              <button style={styles.primaryButton} onClick={attachTemplate} disabled={busy === 'template'}>
-                {busy === 'template' ? 'Loading…' : 'Replace Template'}
+            <div className="flex gap-2 flex-wrap mb-3">
+              <button 
+                className="px-4 py-2 text-xs font-bold rounded-lg bg-white text-slate-950 hover:bg-white/90 shadow-sm transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+                onClick={attachTemplate} 
+                disabled={busy === 'template'}
+              >
+                <Plus size={13} /> {busy === 'template' ? 'Loading…' : 'Replace Template'}
               </button>
               {workflow.templateImagePath && (
-                <button style={styles.button} onClick={removeTemplate}>
-                  Remove
+                <button 
+                  className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+                  onClick={removeTemplate}
+                >
+                  <Trash2 size={13} /> Remove
                 </button>
               )}
             </div>
-            <div style={{ fontSize: 11, color: '#6b7280', wordBreak: 'break-all' }}>
+            <div className="text-[10px] text-slate-500 font-mono break-all leading-normal">
               {workflow.templateImagePath || 'Loading built-in template...'}
             </div>
           </div>
@@ -925,7 +830,7 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
 
         <div style={styles.center}>
           <div style={{ ...styles.card, marginBottom: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div className="grid grid-cols-2 gap-3.5">
               <div>
                 <label style={styles.label}>Design Prompt</label>
                 <textarea
@@ -933,6 +838,7 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
                   onChange={(event) => updateWorkflow({ designPrompt: event.target.value })}
                   placeholder="Example: black varsity jacket with white sleeves, red trim, chest patch, and clean sleeve stripes"
                   style={{ ...styles.textarea, minHeight: 110 }}
+                  className="focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 focus:bg-slate-950/80 hover:border-slate-800 transition-all duration-200"
                 />
               </div>
               <div>
@@ -942,11 +848,12 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
                   onChange={(event) => updateWorkflow({ styleNotes: event.target.value })}
                   placeholder="Example: front logo on torso front, plain back, matching cuffs, simple side seams"
                   style={{ ...styles.textarea, minHeight: 110 }}
+                  className="focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 focus:bg-slate-950/80 hover:border-slate-800 transition-all duration-200"
                 />
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 140px', gap: 14, marginTop: 14 }}>
+            <div className="grid grid-cols-[1fr_1fr_140px] gap-3.5 mt-3.5">
               <div>
                 <label style={styles.label}>Color Palette</label>
                 <input
@@ -954,6 +861,7 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
                   onChange={(event) => updateWorkflow({ colorPalette: event.target.value })}
                   placeholder="black, red, dark gray"
                   style={styles.input}
+                  className="focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 focus:bg-slate-950/80 hover:border-slate-800 transition-all duration-200"
                 />
               </div>
               <div>
@@ -963,6 +871,7 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
                   onChange={(event) => updateWorkflow({ materialNotes: event.target.value })}
                   placeholder="matte fabric, soft trim"
                   style={styles.input}
+                  className="focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 focus:bg-slate-950/80 hover:border-slate-800 transition-all duration-200"
                 />
               </div>
               {workflow.provider === 'replicate' && (
@@ -973,61 +882,99 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
                     onChange={(event) => updateWorkflow({ seed: event.target.value })}
                     placeholder="optional"
                     style={styles.input}
+                    className="focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 focus:bg-slate-950/80 hover:border-slate-800 transition-all duration-200"
                   />
                 </div>
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+            <div className="flex gap-2.5 mt-4 flex-wrap">
               <button
-                style={styles.primaryButton}
+                className="px-4 py-2 text-xs font-bold rounded-lg bg-white text-slate-950 hover:bg-white/90 shadow-sm transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
                 onClick={handleGenerate}
                 disabled={busy === 'generate'}
               >
-                {busy === 'generate' ? 'Generating…' : selectedProvider.generateLabel}
+                <Sparkles size={13} /> {busy === 'generate' ? 'Generating…' : selectedProvider.generateLabel}
               </button>
-              <button style={styles.button} onClick={copyPromptForProvider}>
-                Copy Prompt
+              <button 
+                className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+                onClick={copyPromptForProvider}
+              >
+                <Copy size={13} /> Copy Prompt
               </button>
-              {workflow.resultPath && workflow.provider === 'replicate' && (
-                <button style={styles.button} onClick={saveGeneratedTexture}>
-                  Save PNG
+              <button
+                className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+                onClick={importClothingTexture}
+                disabled={busy === 'import'}
+              >
+                <Upload size={13} /> {busy === 'import' ? 'Importing…' : 'Import PNG'}
+              </button>
+              {workflow.resultPath && (
+                <button 
+                  className="px-4 py-2 text-xs font-bold rounded-lg border border-purple-500/35 bg-purple-950/40 text-purple-300 hover:bg-purple-900/40 hover:border-purple-400 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-[0_0_12px_rgba(168,85,247,0.1)] flex items-center justify-center gap-1.5"
+                  onClick={saveGeneratedTexture}
+                >
+                  <Download size={13} /> Save PNG
                 </button>
               )}
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div className="grid grid-cols-2 gap-4">
             <div style={styles.card}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>
+              <div className="text-xs font-extrabold text-slate-200 mb-2 uppercase tracking-wide">
                 Template Preview
               </div>
               {workflow.templateDataUrl ? (
                 <img
                   src={workflow.templateDataUrl}
                   alt="Roblox clothing template"
-                  style={{ width: '100%', borderRadius: 10, border: '1px solid #252a36' }}
+                  className="w-full rounded-lg border border-white/5 shadow-inner"
                 />
               ) : (
-                <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.6 }}>
-                The built-in shirt template will appear here once loaded.
+                <div className="text-xs text-slate-500 leading-relaxed font-medium">
+                  The built-in shirt template will appear here once loaded.
                 </div>
               )}
             </div>
 
             <div style={styles.card}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>
-                Generated Result
+              <div className="flex justify-between items-center gap-2 mb-2">
+                <div className="text-xs font-extrabold text-slate-200 uppercase tracking-wide">
+                  Result Texture
+                </div>
+                <div className="flex gap-1.5">
+                  <button
+                    className="px-2.5 py-1 text-[10px] font-bold rounded-md border border-white/[0.08] bg-white/[0.04] text-slate-400 hover:bg-white/[0.1] hover:text-slate-200 transition-all duration-200 cursor-pointer flex items-center gap-1"
+                    onClick={importClothingTexture}
+                    disabled={busy === 'import'}
+                  >
+                    <Upload size={11} /> {busy === 'import' ? '…' : 'Import'}
+                  </button>
+                  {workflow.resultPath && (
+                    <button
+                      className="px-2.5 py-1 text-[10px] font-bold rounded-md border border-white/[0.08] bg-white/[0.04] text-slate-400 hover:bg-white/[0.1] hover:text-slate-200 transition-all duration-200 cursor-pointer flex items-center gap-1"
+                      onClick={removeResult}
+                    >
+                      <Trash2 size={11} /> Clear
+                    </button>
+                  )}
+                </div>
               </div>
               {workflow.resultDataUrl ? (
-                <img
-                  src={workflow.resultDataUrl}
-                  alt="Generated classic clothing texture"
-                  style={{ width: '100%', borderRadius: 10, border: '1px solid #252a36' }}
-                />
+                <>
+                  <img
+                    src={workflow.resultDataUrl}
+                    alt="Classic clothing texture"
+                    className="w-full rounded-lg border border-white/5 shadow-inner"
+                  />
+                  <div className="text-[10px] text-slate-500 font-mono break-all leading-normal mt-2">
+                    {workflow.resultPath}
+                  </div>
+                </>
               ) : (
-                <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.6 }}>
-                  Your generated PNG will appear here after Replicate finishes.
+                <div className="text-xs text-slate-500 leading-relaxed font-medium">
+                  Generate with a provider or import your own finished PNG texture here.
                 </div>
               )}
             </div>
@@ -1036,32 +983,48 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
 
         <div style={styles.pack}>
           <div style={{ ...styles.card, marginBottom: 14 }}>
-            <div style={{ fontSize: 11, color: '#7c8499', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">
               Final Prompt
             </div>
             <textarea
               readOnly
               rows={14}
-              style={{ ...styles.textarea, color: '#d5d9e5' }}
+              style={{ ...styles.textarea, color: '#d1d5db' }}
               value={promptPack.finalPrompt || 'Fill in the design prompt to build a prompt.'}
+              className="focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 focus:bg-slate-950/80 hover:border-slate-800 transition-all duration-200 font-mono text-[11px] leading-relaxed"
             />
-            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-              <button style={styles.button} onClick={copyPromptForProvider}>
-                Copy Prompt
+            <div className="flex gap-2 mt-3 flex-wrap">
+              <button 
+                className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+                onClick={copyPromptForProvider}
+              >
+                <Copy size={13} /> Copy Prompt
               </button>
-              <button style={styles.button} onClick={exportPromptPack}>
-                Export Pack
+              <button 
+                className="px-4 py-2 text-xs font-bold rounded-lg border border-purple-500/35 bg-purple-950/40 text-purple-300 hover:bg-purple-900/40 hover:border-purple-400 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-[0_0_12px_rgba(168,85,247,0.1)] flex items-center justify-center gap-1.5"
+                onClick={exportPromptPack}
+              >
+                <FolderDown size={13} /> Export Pack
               </button>
             </div>
           </div>
 
-          <div style={styles.card}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 8 }}>
+          <div style={{ ...styles.card, marginBottom: 14 }}>
+            <div className="text-xs font-bold text-slate-200 mb-2 uppercase tracking-wide">
               Negative Constraints
             </div>
-            <div style={{ fontSize: 12, color: '#9aa0b0', lineHeight: 1.7 }}>
+            <div className="text-[11px] text-slate-400 leading-relaxed font-medium">
               {promptPack.negativePrompt}
             </div>
+          </div>
+
+          <div style={styles.card}>
+            <div className="text-xs font-bold text-slate-200 mb-2 uppercase tracking-wide">
+              Hosted Workflow
+            </div>
+            <pre className="m-0 whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-slate-400 font-medium">
+              {promptPack.workflowNotes}
+            </pre>
           </div>
         </div>
       </div>

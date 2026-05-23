@@ -2,44 +2,65 @@
 import { useState } from 'react'
 
 const OPTIMIZE_PRESETS = [
-  { label: 'Light',  ratio: 0.75, desc: '75% — minimal reduction, best quality' },
-  { label: 'Medium', ratio: 0.50, desc: '50% — balanced quality/performance' },
-  { label: 'Heavy',  ratio: 0.25, desc: '25% — aggressive reduction, game-ready' },
-  { label: 'Ultra',  ratio: 0.10, desc: '10% — maximum reduction, lowest poly' },
+  { label: 'Light', ratio: 0.75, desc: '75% — minimal reduction, best quality' },
+  { label: 'Medium', ratio: 0.5, desc: '50% — balanced quality/performance' },
+  { label: 'Heavy', ratio: 0.25, desc: '25% — aggressive reduction, game-ready' },
+  { label: 'Ultra', ratio: 0.1, desc: '10% — maximum reduction, lowest poly' }
 ]
 
 const RETOPO_PRESETS = [
-  { label: 'Hi',   faces: 5000, desc: '5 000 faces — high detail, closer to source' },
-  { label: 'Mid',  faces: 2000, desc: '2 000 faces — balanced quad topology' },
-  { label: 'Lo',   faces: 800,  desc: '800 faces — game-ready low poly' },
-  { label: 'Tiny', faces: 300,  desc: '300 faces — minimal quad mesh' },
+  { label: 'Hi', faces: 5000, desc: '5,000 faces — high detail' },
+  { label: 'Mid', faces: 2000, desc: '2,000 faces — balanced quad topology' },
+  { label: 'Lo', faces: 800, desc: '800 faces — game-ready low poly' },
+  { label: 'Tiny', faces: 300, desc: '300 faces — minimal quad mesh' }
 ]
+import { 
+  Plus, 
+  Sparkles, 
+  Copy, 
+  Trash2, 
+  History, 
+  RefreshCw, 
+  AlertTriangle, 
+  Image as ImageIcon, 
+  Settings, 
+  RotateCcw,
+  Sparkle,
+  X
+} from 'lucide-react'
+import {
+  REFERENCE_IMAGE_SLOTS,
+  REFERENCE_IMAGE_LABELS,
+  normalizeReferenceImages,
+  partHasReferenceImages,
+  countReferenceImages
+} from './referenceImages'
 
 const ATTACH_POINTS = [
   // Head
-  { id: 'HatAttachment',       label: '🎩 Hat (Top of Head)' },
-  { id: 'HairAttachment',      label: '💇 Hair (Back of Head)' },
-  { id: 'FaceCenterAttachment',label: '👁️ Face Center' },
-  { id: 'FaceFrontAttachment', label: '🥸 Face Front' },
+  { id: 'HatAttachment',       label: 'Hat (Top of Head)' },
+  { id: 'HairAttachment',      label: 'Hair (Back of Head)' },
+  { id: 'FaceCenterAttachment',label: 'Face Center' },
+  { id: 'FaceFrontAttachment', label: 'Face Front' },
   // Upper Torso
-  { id: 'NeckAttachment',      label: '🔗 Neck' },
-  { id: 'BodyFrontAttachment', label: '🦺 Body Front' },
-  { id: 'BodyBackAttachment',  label: '🎒 Body Back' },
-  { id: 'LeftCollarAttachment', label: '◀ Left Collar' },
-  { id: 'RightCollarAttachment', label: '▶ Right Collar' },
+  { id: 'NeckAttachment',      label: 'Neck' },
+  { id: 'BodyFrontAttachment', label: 'Body Front' },
+  { id: 'BodyBackAttachment',  label: 'Body Back' },
+  { id: 'LeftCollarAttachment', label: 'Left Collar' },
+  { id: 'RightCollarAttachment', label: 'Right Collar' },
   // Lower Torso
-  { id: 'WaistCenterAttachment', label: '🔰 Waist Center' },
-  { id: 'WaistFrontAttachment',  label: '⬆ Waist Front' },
-  { id: 'WaistBackAttachment',   label: '⬇ Waist Back' },
+  { id: 'WaistCenterAttachment', label: 'Waist Center' },
+  { id: 'WaistFrontAttachment',  label: 'Waist Front' },
+  { id: 'WaistBackAttachment',   label: 'Waist Back' },
   // Arms
-  { id: 'LeftShoulderAttachment',  label: '◀ Left Shoulder' },
-  { id: 'RightShoulderAttachment', label: '▶ Right Shoulder' },
+  { id: 'LeftShoulderAttachment',  label: 'Left Shoulder' },
+  { id: 'RightShoulderAttachment', label: 'Right Shoulder' },
   // Hands
-  { id: 'LeftGripAttachment',  label: '✋ Left Grip' },
-  { id: 'RightGripAttachment', label: '🤚 Right Grip' },
+  { id: 'LeftGripAttachment',  label: 'Left Grip' },
+  { id: 'RightGripAttachment', label: 'Right Grip' },
   // Feet
-  { id: 'LeftFootAttachment',  label: '👟 Left Foot' },
-  { id: 'RightFootAttachment', label: '👟 Right Foot' },
+  { id: 'LeftFootAttachment',  label: 'Left Foot' },
+  { id: 'RightFootAttachment', label: 'Right Foot' },
 ]
 
 const QUICK_PARTS = {
@@ -80,13 +101,18 @@ export default function PartsList({
   onRemove,
   onDuplicate,
   onGenerate,
-  onPartChange,
-  onImportMesh,
+  onGenerateAll,
+  onPickReferenceImage,
+  onClearReferenceImage,
+  onClearAllReferenceImages,
   onOptimize,
   onRetopo,
+  onPartChange,
   showAttachPoint,
   tripoAssets = [],
+  localAssets = [],
   onAddTripoAsset,
+  importingAssetId = null,
   showTripoBrowser = false,
   assetBrowserLabel = 'Add',
   emptyAssetHint = 'Generate a model in the app, then import it here.',
@@ -100,211 +126,165 @@ export default function PartsList({
   const quickParts = QUICK_PARTS[activeTab] || []
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0f1116' }}>
-      {/* Header */}
-      <div style={{ padding: '14px 16px', borderBottom: '1px solid #1e2330', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-          <div>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6' }}>Parts List</span>
-            <span style={{ fontSize: 11, color: '#555b6e', marginLeft: 8 }}>
-              {parts.length} part{parts.length !== 1 ? 's' : ''}
+    <div className="flex flex-col h-full bg-transparent">
+      {/* Header Panel */}
+      <div className="p-5 border-b border-white/[0.06] shrink-0 flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-2xs font-extrabold uppercase tracking-widest text-slate-300">Parts List</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30">
+              {parts.length}
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          <div className="flex gap-2 shrink-0">
+            {parts.some(
+              (part) =>
+                part.status !== 'generating' &&
+                part.status !== 'done' &&
+                ((part.prompt || '').trim() || partHasReferenceImages(part))
+            ) && (
+              <button
+                onClick={() => onGenerateAll?.()}
+                className="px-4 py-2.5 text-xs font-bold rounded-xl border border-white/[0.08] bg-white/[0.05] text-slate-200 hover:bg-white/[0.1] hover:border-white/[0.15] hover:text-white transition-all duration-200 hover:scale-[1.01] active:scale-[0.98] cursor-pointer backdrop-blur-md flex items-center gap-1.5"
+              >
+                <Sparkles size={13} className="shrink-0 text-slate-300" />
+                Generate All
+              </button>
+            )}
             <button
               onClick={() => onAdd?.()}
-              style={{
-                background: 'linear-gradient(135deg,#6d28d9,#8b5cf6)',
-                border: 'none',
-                borderRadius: 7,
-                padding: '7px 12px',
-                fontSize: 12,
-                fontWeight: 700,
-                color: '#fff',
-                cursor: 'pointer'
-              }}
+              className="px-4 py-2.5 text-xs font-bold rounded-xl bg-white/[0.9] hover:bg-white text-slate-950 shadow-sm transition-all duration-200 hover:scale-[1.01] active:scale-[0.98] cursor-pointer flex items-center gap-1.5 backdrop-blur-md"
             >
-              + Blank Part
-            </button>
-            <button
-              onClick={() => onImportMesh?.()}
-              style={{
-                background: '#12151d',
-                border: '1px solid #1e2330',
-                borderRadius: 7,
-                padding: '7px 10px',
-                fontSize: 12,
-                fontWeight: 700,
-                color: '#9499a8',
-                cursor: 'pointer'
-              }}
-              title="Import a GLB/GLTF/FBX/OBJ mesh directly"
-            >
-              📂 Import Mesh
+              <Plus size={13} className="shrink-0 text-slate-950" />
+              Blank Part
             </button>
           </div>
         </div>
 
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 10, color: '#555b6e', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            Quick add
+        {/* Quick Add Presets Drawer */}
+        <div className="bg-white/[0.02] border border-white/[0.05] rounded-xl p-3.5 shadow-sm">
+          <div className="text-[9px] text-purple-300/80 font-bold uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
+            <span className="w-1 h-1 rounded-full bg-purple-400 shadow-[0_0_4px_#c084fc]"></span>
+            Quick Add Preset
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div className="flex flex-wrap gap-1.5">
             {quickParts.map((template) => (
               <button
                 key={template.name}
                 onClick={() => onAdd?.(template)}
-                style={{
-                  background: '#12151d',
-                  border: '1px solid #1e2330',
-                  borderRadius: 999,
-                  padding: '6px 10px',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#9499a8',
-                  cursor: 'pointer'
-                }}
+                className="px-3.5 py-2 text-xs font-bold rounded-lg bg-white/[0.03] border border-white/[0.06] text-slate-300 hover:text-purple-200 hover:border-purple-500/40 hover:bg-purple-500/10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
               >
-                + {template.name}
+                <Plus size={11} className="text-slate-400 shrink-0" />
+                {template.name}
               </button>
             ))}
           </div>
         </div>
 
         {recentlyRemoved && (
-          <div
-            style={{
-              marginTop: 10,
-              background: 'rgba(248,113,113,0.06)',
-              border: '1px solid rgba(248,113,113,0.18)',
-              borderRadius: 8,
-              padding: '9px 10px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#fca5a5' }}>Part removed</div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: '#7c8499',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}
-              >
+          <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3 flex items-center justify-between gap-3 animate-fadeIn">
+            <div className="min-w-0">
+              <div className="text-2xs font-bold text-red-300 uppercase tracking-wide">Part removed</div>
+              <div className="text-xs text-slate-400 truncate mt-0.5">
                 {recentlyRemoved.name || recentlyRemoved.prompt || 'Untitled part'}
               </div>
             </div>
             <button
               onClick={() => onUndoRemove?.()}
-              style={{
-                flexShrink: 0,
-                background: 'rgba(124,58,237,0.18)',
-                border: '1px solid rgba(124,58,237,0.35)',
-                borderRadius: 6,
-                padding: '5px 10px',
-                fontSize: 11,
-                fontWeight: 700,
-                color: '#c4b5fd',
-                cursor: 'pointer'
-              }}
+              className="shrink-0 px-3.5 py-2 text-xs font-bold bg-purple-500/10 border border-purple-500/25 rounded-lg text-purple-300 hover:bg-purple-500/20 transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-[0.98] flex items-center gap-1.5"
             >
+              <RotateCcw size={12} className="shrink-0" />
               Undo
             </button>
           </div>
         )}
 
         {showTripoBrowser && (
-          <div style={{ marginTop: 10 }}>
+          <div>
             <button
               onClick={() => setShowAssets((prev) => !prev)}
-              style={{
-                width: '100%',
-                background: showAssets ? 'rgba(124,58,237,0.16)' : '#12151d',
-                border: showAssets
-                  ? '1px solid rgba(124,58,237,0.35)'
-                  : '1px solid #1e2330',
-                borderRadius: 8,
-                padding: '9px 12px',
-                fontSize: 12,
-                fontWeight: 700,
-                color: showAssets ? '#c4b5fd' : '#9499a8',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
+              className={`w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold rounded-xl border transition-all duration-200 cursor-pointer hover:scale-[1.01] ${
+                showAssets 
+                  ? 'bg-purple-950/20 border-purple-500/30 text-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.08)]' 
+                  : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-slate-200 hover:border-slate-800'
+              }`}
             >
-              <span>⬡ Browse Tripo History</span>
-              <span style={{ fontSize: 11, color: '#555b6e' }}>
-                {tripoAssets.length} available
+              <span className="flex items-center gap-1.5">
+                <History size={13} className="text-purple-400 shrink-0" />
+                Browse Tripo My Assets
+              </span>
+              <span className="text-[10px] text-slate-500 font-medium">
+                {tripoAssets.length} Tripo{localAssets.length > 0 ? ` · ${localAssets.length} local` : ''}
               </span>
             </button>
 
             {showAssets && (
-              <div
-                style={{
-                  marginTop: 8,
-                  background: '#111318',
-                  border: '1px solid #1e2330',
-                  borderRadius: 10,
-                  padding: 10,
-                  maxHeight: 260,
-                  overflowY: 'auto'
-                }}
-              >
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+              <div className="mt-2 bg-slate-950/40 border border-white/[0.06] rounded-xl p-3 max-h-64 overflow-y-auto shadow-inner backdrop-blur-xl">
+                <div className="flex gap-2 items-center mb-3">
                   <button
                     onClick={() => onRefreshAssets?.()}
                     disabled={assetRefreshState === 'loading'}
-                    style={{
-                      background: 'rgba(124,58,237,0.18)',
-                      border: '1px solid rgba(124,58,237,0.35)',
-                      borderRadius: 6,
-                      padding: '6px 10px',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: '#c4b5fd',
-                      cursor: assetRefreshState === 'loading' ? 'wait' : 'pointer'
-                    }}
+                    className={`px-3.5 py-2 text-xs font-bold rounded-lg border transition-all duration-200 flex items-center gap-1.5 ${
+                      assetRefreshState === 'loading'
+                        ? 'bg-purple-900/10 border-purple-500/10 text-purple-400/50 cursor-wait'
+                        : 'bg-purple-500/10 border-purple-500/25 text-purple-300 hover:bg-purple-500/20 cursor-pointer'
+                    }`}
                   >
-                    {assetRefreshState === 'loading' ? 'Syncing…' : 'Sync Tripo History'}
+                    <RefreshCw size={12} className={`shrink-0 ${assetRefreshState === 'loading' ? 'animate-spin' : ''}`} />
+                    {assetRefreshState === 'loading' ? 'Syncing…' : 'Sync My Assets'}
                   </button>
                   {assetRefreshMessage && (
-                    <span
-                      style={{
-                        fontSize: 10,
-                        color: assetRefreshState === 'error' ? '#fca5a5' : '#7c8499',
-                        lineHeight: 1.4
-                      }}
-                    >
+                    <span className={`text-[10px] leading-tight ${assetRefreshState === 'error' ? 'text-red-400' : 'text-slate-500'}`}>
                       {assetRefreshMessage}
                     </span>
                   )}
                 </div>
 
-                {tripoAssets.length === 0 ? (
-                  <div style={{ padding: '18px 10px', textAlign: 'center' }}>
-                    <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
-                      No Tripo history assets yet
-                    </p>
-                    <p style={{ fontSize: 11, color: '#3e4455', marginTop: 6, lineHeight: 1.6 }}>
-                      {emptyAssetHint}
-                    </p>
+                {tripoAssets.length === 0 && localAssets.length === 0 ? (
+                  <div className="py-4 text-center">
+                    <p className="text-xs text-slate-500 font-medium">No assets yet</p>
+                    <p className="text-[11px] text-slate-600 mt-1 leading-normal">{emptyAssetHint}</p>
                   </div>
                 ) : (
-                  tripoAssets.map((asset) => (
-                    <TripoAssetCard
-                      key={`${asset.id}-${asset.sourceTab}`}
-                      asset={asset}
-                      actionLabel={assetBrowserLabel}
-                      onAdd={() => onAddTripoAsset?.(asset)}
-                    />
-                  ))
+                  <div className="space-y-3">
+                    {tripoAssets.length > 0 && (
+                      <div>
+                        <div className="text-[9px] text-slate-600 font-bold uppercase tracking-wider mb-1.5">
+                          Tripo History
+                        </div>
+                        <div className="space-y-2">
+                          {tripoAssets.map((asset) => (
+                            <TripoAssetCard
+                              key={`tripo-${asset.id}`}
+                              asset={asset}
+                              actionLabel={assetBrowserLabel}
+                              importing={importingAssetId === (asset.id || asset.detailUrl || asset.downloadUrl)}
+                              onAdd={() => onAddTripoAsset?.(asset)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {localAssets.length > 0 && (
+                      <div className="pt-1">
+                        <div className="text-[9px] text-slate-600 font-bold uppercase tracking-wider mb-1.5">
+                          Workspace Models
+                        </div>
+                        <div className="space-y-2">
+                          {localAssets.map((asset) => (
+                            <TripoAssetCard
+                              key={`local-${asset.id || asset.outputPath}`}
+                              asset={asset}
+                              actionLabel={assetBrowserLabel}
+                              importing={importingAssetId === (asset.id || asset.outputPath)}
+                              onAdd={() => onAddTripoAsset?.(asset)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -312,31 +292,25 @@ export default function PartsList({
         )}
       </div>
 
-      {/* Parts */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
+      {/* Parts List Scroll View */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {parts.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '36px 16px', color: '#3e4455' }}>
-            <div style={{ fontSize: 28, marginBottom: 10, opacity: 0.5 }}>⚙</div>
-            <p style={{ fontSize: 13, color: '#555b6e' }}>No parts yet</p>
-            <p style={{ fontSize: 11, color: '#3e4455', marginTop: 4, lineHeight: 1.6 }}>
-              Build assets piece by piece.<br />Example: desk + monitor + keyboard
+          <div className="text-center py-12 px-5 bg-white/[0.01] border border-white/[0.04] rounded-2xl flex flex-col items-center justify-center min-h-[220px]">
+            <div className="w-11 h-11 rounded-full bg-purple-500/10 border border-purple-500/20 flex items-center justify-center mb-4 shadow-[0_0_16px_rgba(168,85,247,0.15)] animate-pulse">
+              <Settings size={18} className="text-purple-400 animate-spin" style={{ animationDuration: '4s' }} />
+            </div>
+            <p className="text-xs font-bold text-slate-200 tracking-wide">No parts added yet</p>
+            <p className="text-[11px] text-slate-400 mt-2 leading-relaxed max-w-[210px] font-medium">
+              Start building your Roblox asset piece-by-piece using the presets.
             </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 6, marginTop: 12 }}>
-              {quickParts.map((template) => (
+            <div className="flex flex-col gap-2 mt-5 w-full">
+              {quickParts.slice(0, 3).map((template) => (
                 <button
                   key={`empty-${template.name}`}
                   onClick={() => onAdd?.(template)}
-                  style={{
-                    background: '#12151d',
-                    border: '1px solid #1e2330',
-                    borderRadius: 999,
-                    padding: '6px 10px',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: '#9499a8',
-                    cursor: 'pointer'
-                  }}
+                  className="w-full py-2 px-3.5 text-xs font-bold rounded-xl bg-purple-500/10 border border-purple-500/15 text-purple-300 hover:bg-purple-500/20 hover:border-purple-400/30 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] cursor-pointer flex items-center justify-center gap-1.5"
                 >
+                  <Plus size={12} className="shrink-0" />
                   Start with {template.name}
                 </button>
               ))}
@@ -351,9 +325,12 @@ export default function PartsList({
               onRemove={() => onRemove(part.id)}
               onDuplicate={() => onDuplicate?.(part.id)}
               onGenerate={() => onGenerate(part.id)}
-              onPartChange={(ch) => onPartChange(part.id, ch)}
+              onPickReferenceImage={(slot) => onPickReferenceImage?.(part.id, slot)}
+              onClearReferenceImage={(slot) => onClearReferenceImage?.(part.id, slot)}
+              onClearAllReferenceImages={() => onClearAllReferenceImages?.(part.id)}
               onOptimize={(ratio) => onOptimize?.(part.id, ratio)}
               onRetopo={(faces) => onRetopo?.(part.id, faces)}
+              onPartChange={(ch) => onPartChange(part.id, ch)}
               showAttachPoint={showAttachPoint}
             />
           ))
@@ -363,203 +340,150 @@ export default function PartsList({
   )
 }
 
-function TripoAssetCard({ asset, onAdd, actionLabel }) {
-  const sourceLabel = asset.sourceTab === 'environment' ? 'Environment' : 'Accessories'
+function TripoAssetCard({ asset, onAdd, actionLabel, importing = false }) {
+  const sourceLabel = asset.sourceTab === 'environment' ? 'Environment Scene' : 'Character Accessory'
   const providerLabel =
     asset.provider === 'tripo-web'
       ? 'Browser Session'
+      : asset.provider === 'tripo-history'
+        ? 'Tripo Web history'
       : asset.provider === 'workspace'
         ? 'Workspace'
-        : 'Tripo'
+        : 'Tripo Engine'
 
   return (
-    <div
-      style={{
-        background: '#13151c',
-        border: '1px solid #1e2330',
-        borderRadius: 9,
-        padding: 10,
-        marginBottom: 8
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 700,
-              color: '#eef0f6',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap'
-            }}
-          >
+    <div className="bg-slate-900/40 border border-white/5 rounded-lg p-2.5 hover:border-purple-500/20 hover:bg-slate-900/60 transition-all duration-200">
+      <div className="flex justify-between items-start gap-2 mb-1.5">
+        <div className="min-w-0">
+          <div className="text-xs font-bold text-slate-200 truncate">
             {asset.name || 'Untitled Tripo Asset'}
           </div>
-          <div style={{ fontSize: 10, color: '#555b6e', marginTop: 3 }}>
-            {sourceLabel} · {providerLabel}
+          <div className="text-[10px] text-slate-500 font-medium mt-0.5">
+            {sourceLabel} · <span className="text-purple-400/80">{providerLabel}</span>
+            {(asset.outputPath || asset.filePath) && (
+              <span className="text-emerald-400/80"> · saved locally</span>
+            )}
           </div>
         </div>
         <button
           onClick={onAdd}
-          style={{
-            flexShrink: 0,
-            background: 'rgba(124,58,237,0.18)',
-            border: '1px solid rgba(124,58,237,0.35)',
-            borderRadius: 6,
-            padding: '5px 9px',
-            fontSize: 11,
-            fontWeight: 700,
-            color: '#c4b5fd',
-            cursor: 'pointer'
-          }}
+          disabled={importing}
+          className={`shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-1 ${
+            importing
+              ? 'bg-slate-800 text-slate-500 cursor-wait'
+              : 'bg-purple-500/15 border border-purple-500/25 text-purple-300 hover:bg-purple-500/25 cursor-pointer'
+          }`}
         >
-          {actionLabel}
+          <Plus size={11} className="shrink-0" />
+          {importing ? 'Importing…' : actionLabel}
         </button>
       </div>
-      <div style={{ fontSize: 11, color: '#7c8499', lineHeight: 1.5 }}>
-        {asset.prompt || 'No prompt saved for this asset.'}
-      </div>
+      {asset.prompt && (
+        <div className="text-[10px] text-slate-400 leading-relaxed font-medium line-clamp-2 italic">
+          &quot;{asset.prompt}&quot;
+        </div>
+      )}
     </div>
   )
 }
 
-function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange, onOptimize, onRetopo, showAttachPoint }) {
-  const [focusPrompt, setFocusPrompt] = useState(false)
-  const [focusName, setFocusName] = useState(false)
-  const [imageMode, setImageMode] = useState(Boolean(part.imagePath))
-  const [multiviewMode, setMultiviewMode] = useState(Boolean(part.multiviewImages?.some(Boolean)))
+function PartCard({
+  part,
+  index,
+  onRemove,
+  onDuplicate,
+  onGenerate,
+  onPickReferenceImage,
+  onClearReferenceImage,
+  onClearAllReferenceImages,
+  onOptimize,
+  onRetopo,
+  onPartChange,
+  showAttachPoint
+}) {
   const [optimizePresetIdx, setOptimizePresetIdx] = useState(1)
   const [retopoFaceIdx, setRetopoFaceIdx] = useState(1)
-
-  const MULTIVIEW_SLOTS = ['Front', 'Back', 'Left', 'Right']
+  const referenceImages = normalizeReferenceImages(part)
+  const referenceCount = countReferenceImages(part)
 
   const STATUS = {
-    pending:    { color: '#555b6e', label: 'Pending' },
-    generating: { color: '#f59e0b', label: 'Generating…' },
-    done:       { color: '#4ade80', label: 'Done ✓' },
-    error:      { color: '#fca5a5', label: 'Error' },
+    pending: { 
+      color: '#94a3b8', 
+      label: 'Pending', 
+      borderClass: 'border-white/[0.08] hover:border-white/[0.15]',
+      glowClass: '' 
+    },
+    generating: { 
+      color: '#f59e0b', 
+      label: 'Generating…', 
+      borderClass: 'border-amber-500/30 animate-pulse', 
+      glowClass: 'shadow-[0_0_12px_rgba(245,158,11,0.15)]' 
+    },
+    done: { 
+      color: '#4ade80', 
+      label: 'Done ✓', 
+      borderClass: 'border-emerald-500/20 hover:border-emerald-500/40', 
+      glowClass: 'shadow-[0_0_12px_rgba(74,222,128,0.1)]' 
+    },
+    error: { 
+      color: '#f87171', 
+      label: 'Error', 
+      borderClass: 'border-rose-500/30 hover:border-rose-500/50', 
+      glowClass: 'shadow-[0_0_12px_rgba(248,113,113,0.1)]' 
+    },
   }
   const st = STATUS[part.status || 'pending']
   const busy = part.status === 'generating'
-  const hasMultiview = multiviewMode && part.multiviewImages?.some(Boolean)
-  const canGen = ((part.prompt || '').trim().length > 0 || Boolean(part.imagePath) || hasMultiview) && !busy
-
-  async function pickReferenceImage() {
-    if (!window.api?.openImage) return
-    const filePath = await window.api.openImage()
-    if (!filePath) return
-    onPartChange({ imagePath: filePath })
-    setImageMode(true)
-  }
-
-  function clearReferenceImage() {
-    onPartChange({ imagePath: null })
-    if (!(part.prompt || '').trim()) setImageMode(false)
-  }
-
-  async function pickMultiviewImage(slotIndex) {
-    if (!window.api?.openImage) return
-    const filePath = await window.api.openImage()
-    if (!filePath) return
-    const updated = [...(part.multiviewImages || [null, null, null, null])]
-    updated[slotIndex] = filePath
-    onPartChange({ multiviewImages: updated })
-  }
-
-  function clearMultiviewSlot(slotIndex) {
-    const updated = [...(part.multiviewImages || [null, null, null, null])]
-    updated[slotIndex] = null
-    onPartChange({ multiviewImages: updated })
-    if (!updated.some(Boolean) && !(part.prompt || '').trim()) setMultiviewMode(false)
-  }
-
-  function toggleImageMode() {
-    if (multiviewMode) {
-      setMultiviewMode(false)
-      onPartChange({ multiviewImages: [] })
-    }
-    setImageMode(v => !v)
-  }
-
-  function toggleMultiviewMode() {
-    if (imageMode) {
-      setImageMode(false)
-      onPartChange({ imagePath: null })
-    }
-    const next = !multiviewMode
-    setMultiviewMode(next)
-    if (!next) onPartChange({ multiviewImages: [] })
-  }
+  const canGen = (((part.prompt || '').trim().length > 0) || partHasReferenceImages(part)) && !busy
 
   return (
-    <div style={{
-      background: '#13151c',
-      border: '1px solid #1e2330',
-      borderLeft: `3px solid ${st.color}`,
-      borderRadius: 10,
-      padding: 14,
-      marginBottom: 10,
-    }}>
-      {/* Row 1: index + name + status + actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#3e4455', minWidth: 18, textAlign: 'center' }}>
+    <div 
+      className={`p-4 rounded-2xl border transition-all duration-300 ${st.borderClass} ${st.glowClass}`}
+      style={{
+        background: 'rgba(16, 19, 28, 0.45)',
+        backdropFilter: 'blur(20px)'
+      }}
+    >
+      {/* Row 1: index + name */}
+      <div className="flex items-center gap-2 mb-2.5">
+        <span className="text-2xs font-extrabold text-slate-500 bg-white/[0.04] border border-white/[0.06] rounded-md px-1.5 py-0.5 min-w-[20px] text-center">
           {index + 1}
         </span>
         <input
           value={part.name || ''}
           onChange={e => onPartChange({ name: e.target.value })}
-          onFocus={() => setFocusName(true)}
-          onBlur={() => setFocusName(false)}
           placeholder="Part name…"
           spellCheck={false}
-          style={{
-            flex: 1, background: '#0d0f14', border: `1px solid ${focusName ? '#7c3aed' : '#252a36'}`,
-            borderRadius: 7, padding: '6px 10px', fontSize: 12, fontWeight: 600, color: '#eef0f6',
-            outline: 'none', fontFamily: 'inherit', transition: 'border-color .15s',
-            boxShadow: focusName ? '0 0 0 3px rgba(124,58,237,0.15)' : 'none',
-          }}
+          className="flex-1 bg-white/[0.03] border border-white/[0.08] rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-200 outline-none transition-all duration-200 focus:bg-white/[0.06] focus:border-white/[0.15] focus:ring-2 focus:ring-white/[0.05]"
         />
-        <span style={{
-          fontSize: 10, fontWeight: 700, color: st.color,
-          padding: '3px 9px', borderRadius: 20,
-          background: `${st.color}18`, border: `1px solid ${st.color}30`,
-          whiteSpace: 'nowrap', letterSpacing: '0.02em',
-        }}>
+      </div>
+
+      {/* Row 2: status + actions */}
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <span 
+          className="text-[10px] font-bold px-2.5 py-1 rounded-full border shrink-0 tracking-wide"
+          style={{
+            color: st.color,
+            borderColor: `${st.color}25`,
+            backgroundColor: `${st.color}08`
+          }}
+        >
           {st.label}
         </span>
-        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+        <div className="flex gap-1.5 shrink-0">
           <button
             onClick={onDuplicate}
-            style={{
-              background: '#12151d',
-              border: '1px solid #1e2330',
-              color: '#7c8499',
-              cursor: 'pointer',
-              padding: '5px 8px',
-              fontSize: 11,
-              lineHeight: 1,
-              borderRadius: 6
-            }}
+            className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] text-slate-400 hover:text-slate-100 hover:bg-white/[0.08] hover:border-white/[0.15] transition-all duration-150 cursor-pointer flex items-center justify-center backdrop-blur-md"
             title="Duplicate part"
           >
-            Duplicate
+            <Copy size={12} className="shrink-0" />
           </button>
           <button
             onClick={onRemove}
-            style={{
-              background: 'rgba(248,113,113,0.08)',
-              border: '1px solid rgba(248,113,113,0.2)',
-              color: '#fca5a5',
-              cursor: 'pointer',
-              padding: '5px 8px',
-              fontSize: 11,
-              lineHeight: 1,
-              borderRadius: 6
-            }}
+            className="p-2.5 rounded-xl border border-red-500/20 bg-red-500/5 text-red-400 hover:text-red-300 hover:bg-red-500/15 hover:border-red-500/40 transition-all duration-150 cursor-pointer flex items-center justify-center backdrop-blur-md"
             title="Delete part"
           >
-            Delete
+            <Trash2 size={12} className="shrink-0" />
           </button>
         </div>
       </div>
@@ -568,9 +492,7 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
       <textarea
         value={part.prompt || ''}
         onChange={e => onPartChange({ prompt: e.target.value })}
-        onFocus={() => setFocusPrompt(true)}
-        onBlur={() => setFocusPrompt(false)}
-        placeholder={imageMode ? 'Optional prompt for image-to-3D…' : 'Describe this part…'}
+        placeholder="Describe this part…"
         rows={3}
         spellCheck={false}
         autoCorrect="off"
@@ -581,308 +503,181 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
             onGenerate()
           }
         }}
-        style={{
-          width: '100%', background: '#0d0f14', border: `1px solid ${focusPrompt ? '#7c3aed' : '#252a36'}`,
-          borderRadius: 8, padding: '9px 11px', fontSize: 12, color: '#c4cad8', resize: 'none',
-          outline: 'none', fontFamily: 'inherit', lineHeight: 1.6,
-          boxShadow: focusPrompt ? '0 0 0 3px rgba(124,58,237,0.15)' : 'none',
-          boxSizing: 'border-box', transition: 'border-color .15s, box-shadow .15s',
-        }}
+        className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl px-3 py-2 text-xs text-slate-200 resize-none outline-none transition-all duration-200 focus:bg-white/[0.06] focus:border-white/[0.15] focus:ring-2 focus:ring-white/[0.05] leading-relaxed"
       />
 
-      {/* Image mode toggle + multiview + reference image */}
-      <div style={{ marginTop: 8 }}>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            onClick={toggleImageMode}
-            style={{
-              background: imageMode ? 'rgba(124,58,237,0.18)' : '#12151d',
-              border: imageMode ? '1px solid rgba(124,58,237,0.45)' : '1px solid #1e2330',
-              borderRadius: 6,
-              padding: '4px 9px',
-              fontSize: 10,
-              fontWeight: 700,
-              color: imageMode ? '#c4b5fd' : '#555b6e',
-              cursor: 'pointer',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase'
-            }}
-          >
-            🖼 Image-to-3D
-          </button>
-          <button
-            onClick={toggleMultiviewMode}
-            style={{
-              background: multiviewMode ? 'rgba(6,182,212,0.18)' : '#12151d',
-              border: multiviewMode ? '1px solid rgba(6,182,212,0.45)' : '1px solid #1e2330',
-              borderRadius: 6,
-              padding: '4px 9px',
-              fontSize: 10,
-              fontWeight: 700,
-              color: multiviewMode ? '#67e8f9' : '#555b6e',
-              cursor: 'pointer',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase'
-            }}
-          >
-            🔲 Multi-view
-          </button>
+      <div className="mt-3">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+            Reference Images (Front · Back · Left · Right)
+          </span>
+          {referenceCount > 0 && (
+            <button
+              onClick={onClearAllReferenceImages}
+              className="text-[10px] font-semibold text-rose-400 hover:text-rose-300 cursor-pointer bg-transparent border-none p-0 transition-colors duration-150"
+            >
+              Clear All
+            </button>
+          )}
         </div>
-
-        {imageMode && !multiviewMode && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-            {part.imagePath ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 11, color: '#4ade80', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  ✓ {part.imagePath.split(/[\\/]/).pop()}
-                </span>
-                <button
-                  onClick={clearReferenceImage}
-                  style={{ background: 'none', border: 'none', color: '#7c8499', cursor: 'pointer', fontSize: 11, padding: '2px 4px', flexShrink: 0 }}
-                >
-                  ✕
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={pickReferenceImage}
-                style={{
-                  background: '#12151d',
-                  border: '1px solid #252a36',
-                  borderRadius: 6,
-                  padding: '4px 9px',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#9499a8',
-                  cursor: 'pointer'
-                }}
+        <div className="grid grid-cols-2 gap-2">
+          {REFERENCE_IMAGE_SLOTS.map((slot) => {
+            const ref = referenceImages[slot]
+            return (
+              <div
+                key={slot}
+                className="rounded-lg border border-white/5 bg-slate-950/30 p-2 flex flex-col gap-1.5"
               >
-                Attach Image…
-              </button>
-            )}
-          </div>
-        )}
-
-        {multiviewMode && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginTop: 7 }}>
-            {MULTIVIEW_SLOTS.map((label, i) => {
-              const filePath = part.multiviewImages?.[i] || null
-              return (
-                <div key={label} style={{ background: '#0d0f14', border: '1px solid #1e2330', borderRadius: 6, padding: '5px 8px', display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-                  <span style={{ fontSize: 10, color: '#555b6e', flexShrink: 0 }}>{label}</span>
-                  {filePath ? (
-                    <>
-                      <span style={{ fontSize: 10, color: '#4ade80', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {filePath.split(/[\\/]/).pop()}
-                      </span>
-                      <button
-                        onClick={() => clearMultiviewSlot(i)}
-                        style={{ background: 'none', border: 'none', color: '#7c8499', cursor: 'pointer', fontSize: 10, padding: '0 2px', flexShrink: 0 }}
-                      >✕</button>
-                    </>
-                  ) : (
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                    {REFERENCE_IMAGE_LABELS[slot]}
+                  </span>
+                  {ref?.path && (
                     <button
-                      onClick={() => pickMultiviewImage(i)}
-                      style={{ background: 'none', border: 'none', color: '#7c8499', cursor: 'pointer', fontSize: 10, padding: 0, textDecoration: 'underline' }}
+                      onClick={() => onClearReferenceImage(slot)}
+                      className="text-slate-500 hover:text-rose-400 cursor-pointer bg-transparent border-none p-0"
+                      title={`Remove ${REFERENCE_IMAGE_LABELS[slot]} image`}
                     >
-                      + Add
+                      <X size={11} />
                     </button>
                   )}
                 </div>
-              )
-            })}
-          </div>
-        )}
+                <button
+                  onClick={() => onPickReferenceImage(slot)}
+                  className="flex items-center gap-2 w-full text-left rounded-md border border-dashed border-slate-700/80 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all duration-200 cursor-pointer p-1.5"
+                >
+                  {ref?.preview ? (
+                    <img
+                      src={ref.preview}
+                      alt={`${REFERENCE_IMAGE_LABELS[slot]} reference`}
+                      className="w-10 h-10 object-cover rounded-md border border-white/10 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-md border border-dashed border-slate-700 bg-slate-950/40 flex items-center justify-center shrink-0">
+                      <ImageIcon size={14} className="text-slate-600" />
+                    </div>
+                  )}
+                  <span className="text-[10px] font-semibold text-slate-500 truncate">
+                    {ref?.path ? 'Change' : 'Attach'}
+                  </span>
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        <p className="mt-2 text-[10px] text-slate-600 leading-relaxed">
+          Attach one image for image-to-3D, or add back/left/right for Tripo multiview generation.
+        </p>
       </div>
 
       {/* Attach point selector */}
       {showAttachPoint && (
-        <select
-          value={part.attachPoint || 'HatAttachment'}
-          onChange={e => onPartChange({ attachPoint: e.target.value })}
-          style={{
-            width: '100%', marginTop: 8, background: '#0d0f14', border: '1px solid #252a36',
-            borderRadius: 8, padding: '7px 10px', fontSize: 12, color: '#7c8499',
-            cursor: 'pointer', outline: 'none', boxSizing: 'border-box',
-            appearance: 'none', WebkitAppearance: 'none',
-          }}
-        >
-          {ATTACH_POINTS.map(ap => (
-            <option key={ap.id} value={ap.id}>{ap.label}</option>
-          ))}
-        </select>
+        <div className="relative mt-2.5">
+          <select
+            value={part.attachPoint || 'HatAttachment'}
+            onChange={e => onPartChange({ attachPoint: e.target.value })}
+            className="w-full bg-slate-950/60 border border-white/5 rounded-lg px-3 py-2 text-xs text-slate-400 cursor-pointer outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 appearance-none font-semibold transition-all duration-250"
+          >
+            {ATTACH_POINTS.map(ap => (
+              <option key={ap.id} value={ap.id} className="bg-slate-950 text-slate-300">{ap.label}</option>
+            ))}
+          </select>
+        </div>
       )}
 
       {/* Error message */}
       {part.status === 'error' && part.error && (
-        <div style={{ marginTop: 8, fontSize: 11, color: '#fca5a5', background: 'rgba(248,113,113,0.07)', borderRadius: 6, padding: '6px 10px', lineHeight: 1.5 }}>
-          ⚠ {part.error}
+        <div className="mt-2.5 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg p-2.5 leading-relaxed flex items-start gap-2">
+          <AlertTriangle size={14} className="text-rose-400 shrink-0 mt-0.5" />
+          <span>{part.error}</span>
         </div>
       )}
 
       {/* Generate button */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+      <div className="flex gap-2 mt-3">
         <button
           onClick={onGenerate}
           disabled={!canGen}
-          style={{
-            flex: 1,
-            padding: '9px 0',
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 700,
-            background: busy ? 'rgba(124,58,237,0.07)'
-              : part.status === 'done' ? 'rgba(74,222,128,0.1)'
-              : canGen ? 'linear-gradient(135deg,#6d28d9,#8b5cf6)'
-              : '#13151c',
-            color: busy ? '#6d28d9'
-              : part.status === 'done' ? '#4ade80'
-              : canGen ? '#fff' : '#3e4455',
-            border: busy ? '1px solid rgba(124,58,237,0.25)'
-              : part.status === 'done' ? '1px solid rgba(74,222,128,0.2)'
-              : canGen ? 'none' : '1px solid #1e2330',
-            cursor: canGen ? 'pointer' : 'not-allowed',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            boxSizing: 'border-box',
-            transition: 'opacity .15s',
-            letterSpacing: '0.02em',
-          }}
+          className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] ${
+            busy 
+              ? 'bg-white/[0.05] border border-white/[0.1] text-white/50 cursor-wait animate-pulse'
+              : part.status === 'done' 
+                ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 cursor-pointer'
+                : canGen 
+                  ? 'bg-white text-slate-950 hover:bg-white/90 shadow-sm cursor-pointer'
+                  : 'bg-white/[0.02] border border-white/[0.04] text-slate-500 cursor-not-allowed'
+          }`}
         >
-          {busy ? <><SmallSpinIcon />Generating…</> : part.status === 'done' ? '↺ Regenerate' : '⚡ Generate Part'}
+          {busy ? (
+            <>
+              <SmallSpinIcon />
+              <span>Generating…</span>
+            </>
+          ) : part.status === 'done' ? (
+            <>
+              <RotateCcw size={12} className="shrink-0 text-emerald-300" />
+              <span>Regenerate</span>
+            </>
+          ) : (
+            <>
+              <Sparkles size={13} className="shrink-0" />
+              <span>Generate Part</span>
+            </>
+          )}
         </button>
-        {part.status === 'done' && part.outputPath && (
-          <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
+      </div>
+
+      {part.status === 'done' && part.outputPath && (
+        <div className="mt-3 grid gap-2">
+          <div className="flex gap-2">
             <select
               disabled={part.optimizeState === 'optimizing'}
               value={optimizePresetIdx}
-              onChange={(e) => setOptimizePresetIdx(Number(e.target.value))}
-              title={OPTIMIZE_PRESETS[optimizePresetIdx].desc}
-              style={{
-                padding: '4px 6px',
-                borderRadius: 8,
-                fontSize: 11,
-                fontWeight: 600,
-                background: '#12151d',
-                color: '#7c8499',
-                border: '1px solid #1e2330',
-                cursor: part.optimizeState === 'optimizing' ? 'wait' : 'pointer',
-                outline: 'none',
-              }}
+              onChange={(event) => setOptimizePresetIdx(Number(event.target.value))}
+              className="bg-slate-950/60 border border-white/10 rounded-lg px-2 py-2 text-[11px] text-slate-400"
             >
-              {OPTIMIZE_PRESETS.map((p, i) => (
-                <option key={p.label} value={i}>{p.label}</option>
+              {OPTIMIZE_PRESETS.map((preset, index) => (
+                <option key={preset.label} value={index}>{preset.label}</option>
               ))}
             </select>
             <button
+              type="button"
               onClick={() => onOptimize?.(OPTIMIZE_PRESETS[optimizePresetIdx].ratio)}
               disabled={part.optimizeState === 'optimizing'}
-              title={OPTIMIZE_PRESETS[optimizePresetIdx].desc}
-              style={{
-                padding: '9px 11px',
-                borderRadius: 8,
-                fontSize: 11,
-                fontWeight: 700,
-                background: part.optimizeState === 'done' ? 'rgba(74,222,128,0.1)'
-                  : part.optimizeState === 'error' ? 'rgba(248,113,113,0.08)'
-                  : part.optimizeState === 'optimizing' ? 'rgba(245,158,11,0.08)'
-                  : '#12151d',
-                color: part.optimizeState === 'done' ? '#4ade80'
-                  : part.optimizeState === 'error' ? '#fca5a5'
-                  : part.optimizeState === 'optimizing' ? '#f59e0b'
-                  : '#7c8499',
-                border: part.optimizeState === 'done' ? '1px solid rgba(74,222,128,0.2)'
-                  : part.optimizeState === 'error' ? '1px solid rgba(248,113,113,0.2)'
-                  : part.optimizeState === 'optimizing' ? '1px solid rgba(245,158,11,0.2)'
-                  : '1px solid #1e2330',
-                cursor: part.optimizeState === 'optimizing' ? 'wait' : 'pointer',
-                whiteSpace: 'nowrap',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4
-              }}
+              className="flex-1 py-2 rounded-lg text-[11px] font-bold border border-white/10 bg-white/[0.03] text-slate-300 cursor-pointer disabled:opacity-60"
             >
-              {part.optimizeState === 'optimizing' ? <><SmallSpinIcon />Optimizing…</>
-                : part.optimizeState === 'done' ? `✓ -${part.optimizeSaved ?? 0}%`
-                : '✦ Optimize'}
+              {part.optimizeState === 'optimizing' ? 'Optimizing…' : part.optimizeState === 'done' ? `Optimized (-${part.optimizeSaved ?? 0}%)` : 'Optimize Mesh'}
             </button>
           </div>
-        )}
-      </div>
-      {part.optimizeState === 'error' && part.optimizeError && (
-        <div style={{ marginTop: 5, fontSize: 10, color: '#fca5a5', lineHeight: 1.5 }}>
-          ⚠ {part.optimizeError}
+          {part.optimizeState === 'error' && part.optimizeError && (
+            <div className="text-[10px] text-rose-300">{part.optimizeError}</div>
+          )}
+          <div className="flex gap-2">
+            <select
+              disabled={part.retopoState === 'retopoing'}
+              value={retopoFaceIdx}
+              onChange={(event) => setRetopoFaceIdx(Number(event.target.value))}
+              className="bg-slate-950/60 border border-white/10 rounded-lg px-2 py-2 text-[11px] text-slate-400"
+            >
+              {RETOPO_PRESETS.map((preset, index) => (
+                <option key={preset.label} value={index}>{preset.label}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => onRetopo?.(RETOPO_PRESETS[retopoFaceIdx].faces)}
+              disabled={part.retopoState === 'retopoing'}
+              className="flex-1 py-2 rounded-lg text-[11px] font-bold border border-white/10 bg-white/[0.03] text-slate-300 cursor-pointer disabled:opacity-60"
+            >
+              {part.retopoState === 'retopoing' ? 'Retopoing…' : part.retopoState === 'done' ? 'Retopo Complete' : 'Retopo Mesh'}
+            </button>
+          </div>
+          {part.retopoState === 'error' && part.retopoError && (
+            <div className="text-[10px] text-rose-300">{part.retopoError}</div>
+          )}
         </div>
       )}
-
-      {/* Retopo row — shown when a mesh is ready */}
-      {part.status === 'done' && part.outputPath && (
-        <div style={{ display: 'flex', gap: 4, alignItems: 'stretch', marginTop: 6 }}>
-          <select
-            disabled={part.retopoState === 'retopoing'}
-            value={retopoFaceIdx}
-            onChange={(e) => setRetopoFaceIdx(Number(e.target.value))}
-            title={RETOPO_PRESETS[retopoFaceIdx].desc}
-            style={{
-              padding: '4px 6px',
-              borderRadius: 8,
-              fontSize: 11,
-              fontWeight: 600,
-              background: '#12151d',
-              color: '#7c8499',
-              border: '1px solid #1e2330',
-              cursor: part.retopoState === 'retopoing' ? 'wait' : 'pointer',
-              outline: 'none',
-            }}
-          >
-            {RETOPO_PRESETS.map((p, i) => (
-              <option key={p.label} value={i}>{p.label}</option>
-            ))}
-          </select>
-          <button
-            onClick={() => onRetopo?.(RETOPO_PRESETS[retopoFaceIdx].faces)}
-            disabled={part.retopoState === 'retopoing'}
-            title={`Blender QuadriFlow — ${RETOPO_PRESETS[retopoFaceIdx].desc}`}
-            style={{
-              flex: 1,
-              padding: '9px 11px',
-              borderRadius: 8,
-              fontSize: 11,
-              fontWeight: 700,
-              background: part.retopoState === 'done' ? 'rgba(74,222,128,0.1)'
-                : part.retopoState === 'error' ? 'rgba(248,113,113,0.08)'
-                : part.retopoState === 'retopoing' ? 'rgba(96,165,250,0.08)'
-                : '#12151d',
-              color: part.retopoState === 'done' ? '#4ade80'
-                : part.retopoState === 'error' ? '#fca5a5'
-                : part.retopoState === 'retopoing' ? '#60a5fa'
-                : '#7c8499',
-              border: part.retopoState === 'done' ? '1px solid rgba(74,222,128,0.2)'
-                : part.retopoState === 'error' ? '1px solid rgba(248,113,113,0.2)'
-                : part.retopoState === 'retopoing' ? '1px solid rgba(96,165,250,0.2)'
-                : '1px solid #1e2330',
-              cursor: part.retopoState === 'retopoing' ? 'wait' : 'pointer',
-              whiteSpace: 'nowrap',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 4
-            }}
-          >
-            {part.retopoState === 'retopoing' ? <><SmallSpinIcon />Retopoing…</>
-              : part.retopoState === 'done' ? '✓ Retopo'
-              : '⬡ Retopo'}
-          </button>
-        </div>
-      )}
-      {part.retopoState === 'error' && part.retopoError && (
-        <div style={{ marginTop: 5, fontSize: 10, color: '#fca5a5', lineHeight: 1.5 }}>
-          ⚠ {part.retopoError}
-        </div>
-      )}
-      <div style={{ marginTop: 6, fontSize: 10, color: '#3e4455' }}>
+      <div className="mt-2 text-[10px] text-slate-600 font-medium text-center">
         Ctrl+Enter generates the current part
       </div>
     </div>
@@ -892,7 +687,6 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
 function SmallSpinIcon() {
   return (
     <svg style={{ animation: 'spin 1s linear infinite', width: 13, height: 13 }} viewBox="0 0 24 24" fill="none">
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" strokeOpacity="0.25" />
       <path fill="currentColor" fillOpacity="0.75" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
     </svg>

@@ -1,8 +1,12 @@
 /* eslint-disable react/prop-types */
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback } from 'react'
 import TextToAnimation from './TextToAnimation'
 import VideoToAnimation from './VideoToAnimation'
 import AnimationPreview from './AnimationPreview'
+import {
+  normalizeAnimationWorkflow,
+  mergeAnimationWorkflow
+} from './animationWorkflow'
 
 const TABS = [
   { id: 'text', label: 'Text → Animation' },
@@ -10,42 +14,46 @@ const TABS = [
 ]
 
 export default function AnimationModule({ workflowState, setWorkflowState, onChangeModule }) {
-  const [tab, setTab] = useState('text')
-  const [progress, setProgress] = useState(null)
-  const [result, setResult] = useState(() => workflowState?.animationResult || null)
+  const workflow = normalizeAnimationWorkflow(workflowState)
 
-  useEffect(() => {
-    if (!window.api) return
-    const unsub = window.api.onProgress((data) => setProgress(data))
-    return () => unsub()
-  }, [])
+  const patchWorkflow = useCallback(
+    (patch) => {
+      if (!setWorkflowState) return
+      setWorkflowState((prev) => {
+        const current = normalizeAnimationWorkflow(prev)
+        const next = mergeAnimationWorkflow(current, patch)
+        return {
+          ...prev,
+          animationWorkflow: next,
+          animationResult: next.result ?? null
+        }
+      })
+    },
+    [setWorkflowState]
+  )
 
-  useEffect(() => {
-    if (!setWorkflowState) return
-    setWorkflowState((prev) => ({ ...prev, animationResult: result }))
-  }, [result, setWorkflowState])
+  const clearProgress = useCallback(() => patchWorkflow({ progress: null }), [patchWorkflow])
 
-  const clearProgress = useCallback(() => setProgress(null), [])
-
-  const hasPreview = Boolean(result?.bvhPath)
+  const hasPreview = Boolean(workflow.result?.bvhPath)
+  const { tab, progress, result } = workflow
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'rgba(10, 11, 15, 0.25)', backdropFilter: 'blur(20px)' }}>
       {/* Header */}
-      <div style={{ padding: '20px 28px 0', borderBottom: '1px solid #252a36', flexShrink: 0 }}>
+      <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0, background: 'rgba(0,0,0,0.15)' }}>
         <div
           style={{
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'space-between',
-            marginBottom: 16
+            marginBottom: 12
           }}
         >
           <div>
-            <h1 style={{ fontSize: 18, fontWeight: 700, color: '#eef0f6', margin: 0 }}>
+            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#f1f5f9', margin: 0, letterSpacing: '-0.02em' }}>
               Animation Studio
             </h1>
-            <p style={{ fontSize: 13, color: '#555b6e', marginTop: 4 }}>
+            <p style={{ fontSize: 12.5, color: '#94a3b8', marginTop: 6, fontWeight: 500 }}>
               Generate Roblox R15 animations from text or video
             </p>
           </div>
@@ -53,35 +61,39 @@ export default function AnimationModule({ workflowState, setWorkflowState, onCha
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 6,
+              gap: 8,
               fontSize: 11,
-              color: '#555b6e',
+              fontWeight: 600,
+              color: '#64748b',
               paddingTop: 4
             }}
           >
             <span
               style={{
-                width: 7,
-                height: 7,
+                width: 6,
+                height: 6,
                 borderRadius: '50%',
-                background: '#4ade80',
+                background: workflow.activeJob ? '#fbbf24' : '#4ade80',
+                boxShadow: workflow.activeJob ? '0 0 8px #fbbf24' : '0 0 8px #4ade80',
                 display: 'inline-block'
               }}
             />
-            HY-Motion + MediaPipe retargeting
+            {workflow.activeJob ? 'Generation in progress' : 'HY-Motion + MediaPipe retargeting'}
             {result?.bvhPath && (
               <button
                 onClick={() => onChangeModule?.('playground')}
                 style={{
                   marginLeft: 10,
-                  padding: '5px 10px',
+                  padding: '5px 12px',
                   borderRadius: 999,
-                  border: '1px solid rgba(124,58,237,0.35)',
-                  background: 'rgba(124,58,237,0.12)',
+                  border: '1px solid rgba(167,139,250,0.3)',
+                  background: 'rgba(167,139,250,0.15)',
                   color: '#c4b5fd',
                   fontSize: 10,
                   fontWeight: 700,
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(167,139,250,0.1)',
+                  transition: 'all 0.15s'
                 }}
               >
                 Open Playground
@@ -91,27 +103,30 @@ export default function AnimationModule({ workflowState, setWorkflowState, onCha
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: 4 }}>
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              style={{
-                padding: '9px 16px',
-                fontSize: 13,
-                fontWeight: tab === t.id ? 600 : 500,
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: tab === t.id ? '#c4b5fd' : '#6b7280',
-                borderBottom: tab === t.id ? '2px solid #a78bfa' : '2px solid transparent',
-                transition: 'all 0.15s',
-                marginBottom: -1
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div style={{ display: 'flex', gap: 6, background: 'rgba(255,255,255,0.02)', padding: 4, borderRadius: 10, width: 'fit-content', border: '1px solid rgba(255,255,255,0.05)' }}>
+          {TABS.map((t) => {
+            const isActive = tab === t.id
+            return (
+              <button
+                key={t.id}
+                onClick={() => patchWorkflow({ tab: t.id })}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  background: isActive ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
+                  border: isActive ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid transparent',
+                  borderRadius: 7,
+                  cursor: 'pointer',
+                  color: isActive ? '#c4b5fd' : '#64748b',
+                  boxShadow: isActive ? '0 2px 8px rgba(0,0,0,0.15)' : 'none',
+                  transition: 'all 0.15s'
+                }}
+              >
+                {t.label}
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -120,23 +135,24 @@ export default function AnimationModule({ workflowState, setWorkflowState, onCha
         <div
           style={{
             flexShrink: 0,
-            background: '#161921',
-            borderBottom: '1px solid #252a36',
-            padding: '10px 28px'
+            background: 'rgba(0,0,0,0.15)',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+            padding: '12px 28px'
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ fontSize: 12, color: '#a78bfa' }}>{progress.step}</span>
-            <span style={{ fontSize: 11, color: '#555b6e' }}>{progress.pct}%</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#a78bfa' }}>{progress.step}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>{progress.pct}%</span>
           </div>
-          <div style={{ height: 3, background: '#252a36', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ height: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.02)' }}>
             <div
               style={{
                 height: '100%',
                 background: 'linear-gradient(90deg,#7c3aed,#a78bfa)',
                 borderRadius: 2,
                 width: `${progress.pct}%`,
-                transition: 'width 0.3s'
+                boxShadow: '0 0 10px rgba(167,139,250,0.5)',
+                transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
               }}
             />
           </div>
@@ -149,23 +165,29 @@ export default function AnimationModule({ workflowState, setWorkflowState, onCha
         <div
           style={{
             flex: hasPreview ? '0 0 44%' : '1 1 auto',
-            borderRight: hasPreview ? '1px solid #252a36' : 'none',
+            borderRight: hasPreview ? '1px solid rgba(255,255,255,0.06)' : 'none',
             overflow: 'hidden'
           }}
         >
           {tab === 'text' ? (
             <TextToAnimation
-              onProgress={setProgress}
-              onResult={setResult}
-              onClear={clearProgress}
+              textForm={workflow.textForm}
+              activeJob={workflow.activeJob}
+              error={workflow.error}
               result={result}
+              onTextFormChange={(textForm) => patchWorkflow({ textForm })}
+              onPatchWorkflow={patchWorkflow}
+              onClear={clearProgress}
             />
           ) : (
             <VideoToAnimation
-              onProgress={setProgress}
-              onResult={setResult}
-              onClear={clearProgress}
+              videoForm={workflow.videoForm}
+              activeJob={workflow.activeJob}
+              error={workflow.error}
               result={result}
+              onVideoFormChange={(videoForm) => patchWorkflow({ videoForm })}
+              onPatchWorkflow={patchWorkflow}
+              onClear={clearProgress}
             />
           )}
         </div>

@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types, react-hooks/set-state-in-effect */
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js'

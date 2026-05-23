@@ -149,7 +149,7 @@ def main():
     parser.add_argument("--image-left",    default="", dest="image_left")
     parser.add_argument("--image-right",   default="", dest="image_right")
     parser.add_argument("--output",        default="output.glb")
-    parser.add_argument("--model-version", default="v2.5-20250123", dest="model_version")
+    parser.add_argument("--model-version", default="v3.1-20260211", dest="model_version")
     parser.add_argument("--style",         default="None")
     parser.add_argument("--texture",       action="store_true", default=True)
     parser.add_argument("--no-texture",    action="store_false", dest="texture")

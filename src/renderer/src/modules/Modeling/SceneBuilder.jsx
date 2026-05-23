@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types */
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -19,6 +20,17 @@ export default function SceneBuilder({ parts = [], onExport }) {
   const stateRef = useRef({})
   const [selectedId, setSelectedId] = useState(null)
   const [transformMode, setTransformMode] = useState('translate')
+
+  function rearrange() {
+    const { partMap } = stateRef.current
+    if (!partMap) return
+    let i = 0
+    for (const group of partMap.values()) {
+      group.position.x = (i - (partMap.size - 1) / 2) * SPACING
+      group.position.z = 0
+      i++
+    }
+  }
 
   // ── Three.js setup ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -214,17 +226,6 @@ export default function SceneBuilder({ parts = [], onExport }) {
       }, err => console.error('[SceneBuilder] parse error:', err))
     }
   }, [parts])
-
-  function rearrange() {
-    const { partMap } = stateRef.current
-    if (!partMap) return
-    let i = 0
-    for (const group of partMap.values()) {
-      group.position.x = (i - (partMap.size - 1) / 2) * SPACING
-      group.position.z = 0
-      i++
-    }
-  }
 
   function clearScene() {
     const s = stateRef.current
