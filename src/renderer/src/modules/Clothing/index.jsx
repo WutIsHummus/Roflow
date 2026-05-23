@@ -139,15 +139,6 @@ function buildPromptPack(workflow) {
 
   const finalPrompt = `${hardRequirements}\n\n${designBrief}`
 
-  const workflowNotes = [
-    'Workflow',
-    '1. Start with the built-in Roblox shirt template or attach your own template PNG.',
-    '2. Write the clothing direction in plain language.',
-    '3. Generate with Replicate FLUX Kontext Pro so it fills the UV panels with clothing artwork.',
-    '4. Inspect seams and clean up any edge issues in an editor before upload.',
-    '5. Upload the final PNG to Roblox as classic clothing.'
-  ].join('\n')
-
   const exportText = [
     'Roblox Classic Clothing Prompt Pack',
     '',
@@ -164,9 +155,7 @@ function buildPromptPack(workflow) {
     negativePrompt,
     '',
     'Final Prompt',
-    finalPrompt,
-    '',
-    workflowNotes
+    finalPrompt
   ]
     .filter(Boolean)
     .join('\n')
@@ -175,8 +164,7 @@ function buildPromptPack(workflow) {
     hardRequirements,
     negativePrompt,
     finalPrompt,
-    exportText,
-    workflowNotes
+    exportText
   }
 }
 
@@ -978,31 +966,13 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
             </div>
           </div>
 
-          <div style={{ ...styles.card, marginBottom: 14 }}>
+          <div style={styles.card}>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 8 }}>
               Negative Constraints
             </div>
             <div style={{ fontSize: 12, color: '#9aa0b0', lineHeight: 1.7 }}>
               {promptPack.negativePrompt}
             </div>
-          </div>
-
-          <div style={styles.card}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 8 }}>
-              Hosted Workflow
-            </div>
-            <pre
-              style={{
-                margin: 0,
-                whiteSpace: 'pre-wrap',
-                fontFamily: 'inherit',
-                fontSize: 12,
-                lineHeight: 1.7,
-                color: '#9aa0b0'
-              }}
-            >
-              {promptPack.workflowNotes}
-            </pre>
           </div>
         </div>
       </div>

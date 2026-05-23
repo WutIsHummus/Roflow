@@ -1289,6 +1289,181 @@ Include 2 to 4 layers. Choose values that are practical for Roblox and mobile-fr
   }
 })
 
+// ── IPC: SFX — AI Recipe Generation (DeepSeek) ───────────────────────────
+
+ipcMain.handle('sfx:generateRecipe', async (_, payload) => {
+  try {
+    const { description, category, gameContext, apiKey } = payload || {}
+
+    if (!apiKey) {
+      return { success: false, error: 'A DeepSeek API key is required. Add it in the SFX panel.' }
+    }
+    if (!description?.trim()) {
+      return { success: false, error: 'A sound description is required.' }
+    }
+
+    const systemPrompt = `You are a Roblox audio designer specialising in SoundService configuration and Lua scripting. You always respond with valid JSON only — no markdown, no extra text.`
+
+    const userPrompt = `Design a Roblox SoundService setup for the following:
+
+Sound description: ${description.trim()}
+Category: ${category || 'general'}
+Game context: ${gameContext || '(not specified)'}
+
+Return exactly this JSON structure (all fields required):
+{
+  "soundName": "short descriptive name",
+  "category": "hit" | "ambient" | "ui" | "music" | "ability" | "environment",
+  "description": "one sentence design brief",
+  "looped": false,
+  "volume": 0.85,
+  "rollOffMaxDistance": 80,
+  "rollOffMinDistance": 10,
+  "playbackSpeed": 1.0,
+  "soundEffects": [
+    {
+      "type": "EqualizerSoundEffect" | "ReverbSoundEffect" | "DistortionSoundEffect" | "CompressorSoundEffect" | "PitchShiftSoundEffect" | "TremoloSoundEffect",
+      "params": { }
+    }
+  ],
+  "layerBreakdown": [
+    {
+      "name": "layer name",
+      "role": "what it contributes",
+      "frequency": "low" | "mid" | "high",
+      "notes": ""
+    }
+  ],
+  "audioSearchTerms": [
+    { "source": "Roblox Audio Marketplace", "query": "search keywords" },
+    { "source": "Freesound.org", "query": "search keywords" }
+  ],
+  "luaScript": "-- Roblox SoundService Lua (use double backslash n for newlines, not actual newlines)",
+  "designNotes": "implementation guidance"
+}
+
+For soundEffects, use only 1–3 effects with realistic Roblox parameter values.
+For layerBreakdown, include 2–3 layers.
+The luaScript must be a single JSON string — escape all newlines as \\n and quotes as \\".`
+
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.4
+      })
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      return { success: false, error: `DeepSeek API error ${response.status}: ${errText.slice(0, 240)}` }
+    }
+
+    const data = await response.json()
+    const content = data?.choices?.[0]?.message?.content
+    if (!content) return { success: false, error: 'DeepSeek returned an empty response.' }
+
+    let recipe
+    try { recipe = JSON.parse(content) } catch {
+      return { success: false, error: 'DeepSeek response was not valid JSON.' }
+    }
+
+    return { success: true, recipe }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+// ── IPC: Building — AI Recipe Generation (DeepSeek) ──────────────────────
+
+ipcMain.handle('building:generateRecipe', async (_, payload) => {
+  try {
+    const { description, style, gameType, apiKey } = payload || {}
+
+    if (!apiKey) {
+      return { success: false, error: 'A DeepSeek API key is required. Add it in the Building panel.' }
+    }
+    if (!description?.trim()) {
+      return { success: false, error: 'A building description is required.' }
+    }
+
+    const systemPrompt = `You are a Roblox 3D environment designer and Lua scripter. You decompose building descriptions into 3D components ready for Tripo3D generation and Roblox Studio assembly. You always respond with valid JSON only — no markdown, no extra text.`
+
+    const userPrompt = `Design a Roblox building for the following:
+
+Building description: ${description.trim()}
+Architectural style: ${style || 'generic'}
+Game type / genre: ${gameType || '(not specified)'}
+
+Return exactly this JSON structure:
+{
+  "buildingName": "descriptive building name",
+  "style": "architectural style label",
+  "description": "one sentence brief",
+  "theme": "game theme",
+  "components": [
+    {
+      "name": "component name",
+      "tripoPrompt": "optimised text-to-3D prompt for Tripo3D (80 words max, no commas, descriptive)",
+      "robloxSize": "WxHxD in studs, e.g. 20x8x20",
+      "robloxMaterial": "SmoothPlastic" | "Brick" | "Wood" | "WoodPlanks" | "Concrete" | "Metal" | "Slate" | "Marble",
+      "robloxColor": "#rrggbb",
+      "assemblyHint": "brief Roblox Studio placement note",
+      "priority": 1
+    }
+  ],
+  "luaScript": "-- Roblox Studio script (escape newlines as \\n)",
+  "designNotes": "style guidance and material recommendations"
+}
+
+Include 3–6 components covering the most important structural parts (foundation, walls, roof, door, etc.). Order components by build priority (1 = first). The tripoPrompt must be phrased for a text-to-3D model generator — focus on shape, style, material.`
+
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.4
+      })
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      return { success: false, error: `DeepSeek API error ${response.status}: ${errText.slice(0, 240)}` }
+    }
+
+    const data = await response.json()
+    const content = data?.choices?.[0]?.message?.content
+    if (!content) return { success: false, error: 'DeepSeek returned an empty response.' }
+
+    let recipe
+    try { recipe = JSON.parse(content) } catch {
+      return { success: false, error: 'DeepSeek response was not valid JSON.' }
+    }
+
+    return { success: true, recipe }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
 ipcMain.handle('modeling:listGeneratedModels', async () => {
   try {
     const items = [

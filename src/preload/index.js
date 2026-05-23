@@ -22,6 +22,8 @@ const api = {
   writeTextFile: (opts) => ipcRenderer.invoke('fs:writeTextFile', opts),
   exportVfxPackage: (opts) => ipcRenderer.invoke('vfx:exportPackage', opts),
   vfxGenerateRecipe: (opts) => ipcRenderer.invoke('vfx:generateRecipe', opts),
+  sfxGenerateRecipe: (opts) => ipcRenderer.invoke('sfx:generateRecipe', opts),
+  buildingGenerateRecipe: (opts) => ipcRenderer.invoke('building:generateRecipe', opts),
 
   // Config
   configGet: (key) => ipcRenderer.invoke('config:get', key),
