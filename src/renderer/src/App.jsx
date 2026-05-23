@@ -51,7 +51,13 @@ function serializePart(part) {
 
 function serializeClothingWorkflow(workflow) {
   if (!workflow) return null
-  const { resultDataUrl: _resultDataUrl, templateDataUrl: _templateDataUrl, ...rest } = workflow
+  const {
+    resultDataUrl: _resultDataUrl,
+    shirtResultDataUrl: _shirtResultDataUrl,
+    pantsResultDataUrl: _pantsResultDataUrl,
+    templateDataUrl: _templateDataUrl,
+    ...rest
+  } = workflow
   return rest
 }
 

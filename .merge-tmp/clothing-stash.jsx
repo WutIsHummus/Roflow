@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+﻿/* eslint-disable react/prop-types */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CONFIG_KEYS } from '../../../../shared/configKeys.js'
 import { useConfigKey } from '../../hooks/useConfigKey.js'
@@ -25,41 +25,15 @@ const DEFAULT_WORKFLOW = {
   styleNotes: '',
   templateImagePath: null,
   templateDataUrl: null,
-  shirtResultPath: null,
-  shirtResultDataUrl: null,
-  pantsResultPath: null,
-  pantsResultDataUrl: null,
   resultPath: null,
   resultDataUrl: null,
   seed: '',
   lastPrompt: ''
 }
 
-function clothingSlotKeys(assetType) {
-  return assetType === 'pants'
-    ? { path: 'pantsResultPath', dataUrl: 'pantsResultDataUrl' }
-    : { path: 'shirtResultPath', dataUrl: 'shirtResultDataUrl' }
-}
-
-function getClothingSlotPaths(workflow, assetType) {
-  const { path, dataUrl } = clothingSlotKeys(assetType)
-  let resultPath = workflow?.[path] ?? null
-  let resultDataUrl = workflow?.[dataUrl] ?? null
-  if (!resultPath && !resultDataUrl && workflow) {
-    const legacyType = workflow.assetType || 'shirt'
-    if (legacyType === assetType && (workflow.resultPath || workflow.resultDataUrl)) {
-      resultPath = workflow.resultPath
-      resultDataUrl = workflow.resultDataUrl
-    }
-  }
-  return { resultPath, resultDataUrl }
-}
-
 const REPLICATE_MODEL = 'black-forest-labs/flux-kontext-pro'
 const BUNDLED_SHIRT_TEMPLATE_URL = '/roblox-classic-shirt-template.png'
-const BUNDLED_PANTS_TEMPLATE_URL = '/roblox-classic-pants-template.png'
 const BUNDLED_SHIRT_TEMPLATE_LABEL = 'Built-in Roblox shirt template'
-const BUNDLED_PANTS_TEMPLATE_LABEL = 'Built-in Roblox pants template'
 
 const PROVIDERS = {
   replicate: {
@@ -389,33 +363,20 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
   }, [workflowState?.clothingWorkflow?.templateDataUrl])
 
   useEffect(() => {
-    if (!workflow) return undefined
+    if (!workflow.resultPath || workflow.resultDataUrl) return undefined
     let cancelled = false
 
-    async function hydrateSlot(assetType) {
-      const { path, dataUrl } = clothingSlotKeys(assetType)
-      const slotPaths = getClothingSlotPaths(workflow, assetType)
-      if (!slotPaths.resultPath || slotPaths.resultDataUrl || workflow[dataUrl]) return
-
-      const result = await window.api.readFileAsDataURL({ filePath: slotPaths.resultPath })
+    async function hydrateResultTexture() {
+      const result = await window.api.readFileAsDataURL({ filePath: workflow.resultPath })
       if (cancelled || !result.success) return
-      setWorkflow((prev) => ({ ...prev, [dataUrl]: result.dataUrl }))
+      setWorkflow((prev) => ({ ...prev, resultDataUrl: result.dataUrl }))
     }
 
-    hydrateSlot('shirt').catch(() => {})
-    hydrateSlot('pants').catch(() => {})
+    hydrateResultTexture().catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [
-    workflow.shirtResultPath,
-    workflow.shirtResultDataUrl,
-    workflow.pantsResultPath,
-    workflow.pantsResultDataUrl,
-    workflow.resultPath,
-    workflow.resultDataUrl,
-    workflow.assetType
-  ])
+  }, [workflow.resultPath, workflow.resultDataUrl])
 
   useEffect(() => {
     if (!setWorkflowState) return
@@ -590,35 +551,22 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
       setNotice(result.error || 'Could not load clothing image.')
       return
     }
-    const slot = workflow.assetType || 'shirt'
-    const { path, dataUrl } = clothingSlotKeys(slot)
-    const changes = {
-      assetType: slot,
-      [path]: filePath,
-      [dataUrl]: result.dataUrl,
+    updateWorkflow({
+      resultPath: filePath,
+      resultDataUrl: result.dataUrl,
       lastPrompt: ''
-    }
-    changes.resultPath = filePath
-    changes.resultDataUrl = result.dataUrl
-    updateWorkflow(changes)
-    setNotice(`${slot === 'pants' ? 'Pants' : 'Shirt'} texture imported.`)
-  }, [updateWorkflow, workflow.assetType])
+    })
+    setNotice('Clothing texture imported.')
+  }, [updateWorkflow])
 
   const removeResult = useCallback(() => {
-    const slot = workflow.assetType || 'shirt'
-    const { path, dataUrl } = clothingSlotKeys(slot)
-    const changes = {
-      [path]: null,
-      [dataUrl]: null,
+    updateWorkflow({
+      resultPath: null,
+      resultDataUrl: null,
       lastPrompt: ''
-    }
-    if ((workflow.assetType || 'shirt') === slot) {
-      changes.resultPath = null
-      changes.resultDataUrl = null
-    }
-    updateWorkflow(changes)
-    setNotice(`${slot === 'pants' ? 'Pants' : 'Shirt'} result cleared.`)
-  }, [updateWorkflow, workflow.assetType])
+    })
+    setNotice('Result cleared.')
+  }, [updateWorkflow])
 
   const exportPromptPack = useCallback(async () => {
     const filePath = await window.api.saveFile({
@@ -640,18 +588,17 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
   }, [promptPack.exportText])
 
   const saveGeneratedTexture = useCallback(async () => {
-    const slotPaths = getClothingSlotPaths(workflow, workflow.assetType || 'shirt')
-    if (!slotPaths.resultPath) return
+    if (!workflow.resultPath) return
     const filePath = await window.api.saveFile({
       title: 'Save Classic Clothing Texture',
       defaultPath: `roblox-${workflow.assetType}-texture.png`,
       filters: [{ name: 'PNG Images', extensions: ['png'] }]
     })
     if (!filePath) return
-    await window.api.copyFile({ src: slotPaths.resultPath, dest: filePath })
+    await window.api.copyFile({ src: workflow.resultPath, dest: filePath })
     setNotice('Clothing texture saved.')
     window.api.openPath(filePath)
-  }, [workflow])
+  }, [workflow.assetType, workflow.resultPath])
 
   const generateTexture = useCallback(async () => {
     if (!replicateToken.trim()) {
@@ -668,7 +615,7 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
     }
 
     setBusy('generate')
-    setProgress({ step: 'Preparing Replicate request…', pct: 4 })
+    setProgress({ step: 'Preparing Replicate requestΓÇª', pct: 4 })
 
     const parsedSeed =
       workflow.seed.trim() && Number.isFinite(Number(workflow.seed)) ? Number(workflow.seed) : null
@@ -692,23 +639,15 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
 
     const dataUrlResult = await window.api.readFileAsDataURL({ filePath: result.outputPath })
     setProgress(null)
-    const slot = workflow.assetType || 'shirt'
-    const { path, dataUrl } = clothingSlotKeys(slot)
     updateWorkflow({
-      assetType: slot,
-      [path]: result.outputPath,
-      [dataUrl]: dataUrlResult.success ? dataUrlResult.dataUrl : null,
       resultPath: result.outputPath,
       resultDataUrl: dataUrlResult.success ? dataUrlResult.dataUrl : null,
       lastPrompt: promptPack.finalPrompt
     })
-    setNotice(`${slot === 'pants' ? 'Pants' : 'Shirt'} texture generated.`)
-  }, [promptPack.finalPrompt, replicateToken, updateWorkflow, workflow.assetType, workflow.designPrompt, workflow.seed, workflow.templateDataUrl, workflow.templateImagePath])
+    setNotice('Classic clothing texture generated.')
+  }, [promptPack.finalPrompt, replicateToken, updateWorkflow, workflow.designPrompt, workflow.seed, workflow.templateDataUrl, workflow.templateImagePath])
 
   const selectedProvider = PROVIDERS[workflow.provider] || PROVIDERS.replicate
-  const activeSlotPaths = getClothingSlotPaths(workflow, workflow.assetType || 'shirt')
-  const shirtSlotPaths = getClothingSlotPaths(workflow, 'shirt')
-  const pantsSlotPaths = getClothingSlotPaths(workflow, 'pants')
 
   const handleGenerate = workflow.provider === 'replicate' ? generateTexture : generateWithWebProvider
 
@@ -737,7 +676,7 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
               onClick={importClothingTexture}
               disabled={busy === 'import'}
             >
-              <Upload size={13} /> {busy === 'import' ? 'Importing…' : 'Import PNG'}
+              <Upload size={13} /> {busy === 'import' ? 'ImportingΓÇª' : 'Import PNG'}
             </button>
             <button 
               className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
@@ -750,7 +689,7 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
               onClick={handleGenerate} 
               disabled={busy === 'generate'}
             >
-              <Sparkles size={13} /> {busy === 'generate' ? 'Generating…' : selectedProvider.generateLabel}
+              <Sparkles size={13} /> {busy === 'generate' ? 'GeneratingΓÇª' : selectedProvider.generateLabel}
             </button>
           </div>
         </div>
@@ -837,39 +776,24 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
         <div style={styles.rail}>
           <div style={{ ...styles.card, marginBottom: 14 }}>
             <label style={styles.label}>Asset Type</label>
-            <div className="flex gap-2 flex-wrap">
-              {[
-                { id: 'shirt', label: 'Classic Shirt' },
-                { id: 'pants', label: 'Classic Pants' }
-              ].map(({ id, label }) => {
-                const active = workflow.assetType === id
-                const loaded = Boolean(
-                  getClothingSlotPaths(workflow, id).resultPath ||
-                    getClothingSlotPaths(workflow, id).resultDataUrl
-                )
+            <div className="flex gap-2">
+              {['shirt', 'pants'].map((type) => {
+                const active = workflow.assetType === type
                 return (
                   <button
-                    key={id}
-                    className={`flex-1 min-w-[90px] py-2 text-xs font-bold rounded-lg border transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5 ${
+                    key={type}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5 ${
                       active 
                         ? 'bg-purple-500/10 border-purple-500/30 text-purple-300' 
                         : 'border-white/[0.08] bg-white/[0.04] text-slate-400 hover:text-slate-200 hover:border-white/[0.15]'
                     }`}
-                    onClick={() => updateWorkflow({ assetType: id })}
+                    onClick={() => updateWorkflow({ assetType: type })}
                   >
-                    {id === 'shirt' && <Shirt size={12} />}
-                    {label}
-                    {loaded && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_6px_rgba(168,85,247,0.8)]" />
-                    )}
+                    {type === 'shirt' && <Shirt size={12} />}
+                    {type === 'shirt' ? 'Classic Shirt' : 'Classic Pants'}
                   </button>
                 )
               })}
-            </div>
-            <div className="text-[10px] text-slate-500 mt-2 leading-relaxed">
-              Roblox outfits need both a 585×559 shirt template PNG and a separate pants template
-              PNG (torso + legs). Generate or import each slot, then preview both together in
-              Playground.
             </div>
           </div>
 
@@ -878,9 +802,8 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
               Template Input
             </div>
             <div className="text-[11px] text-slate-400 leading-relaxed mb-3.5">
-              {workflow.assetType === 'pants'
-                ? 'Load the Roblox pants template (torso + legs). Replace it only if you use a custom pants UV sheet.'
-                : 'Load the Roblox shirt template (torso + arms). Replace it only if you use a custom shirt UV sheet.'}
+              The built-in shirt template is already loaded. Attach a different template only if you
+              want to replace it.
             </div>
             <div className="flex gap-2 flex-wrap mb-3">
               <button 
@@ -888,7 +811,7 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
                 onClick={attachTemplate} 
                 disabled={busy === 'template'}
               >
-                <Plus size={13} /> {busy === 'template' ? 'Loading…' : 'Replace Template'}
+                <Plus size={13} /> {busy === 'template' ? 'LoadingΓÇª' : 'Replace Template'}
               </button>
               {workflow.templateImagePath && (
                 <button 
@@ -971,7 +894,7 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
                 onClick={handleGenerate}
                 disabled={busy === 'generate'}
               >
-                <Sparkles size={13} /> {busy === 'generate' ? 'Generating…' : selectedProvider.generateLabel}
+                <Sparkles size={13} /> {busy === 'generate' ? 'GeneratingΓÇª' : selectedProvider.generateLabel}
               </button>
               <button 
                 className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
@@ -984,9 +907,9 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
                 onClick={importClothingTexture}
                 disabled={busy === 'import'}
               >
-                <Upload size={13} /> {busy === 'import' ? 'Importing…' : 'Import PNG'}
+                <Upload size={13} /> {busy === 'import' ? 'ImportingΓÇª' : 'Import PNG'}
               </button>
-              {activeSlotPaths.resultPath && (
+              {workflow.resultPath && (
                 <button 
                   className="px-4 py-2 text-xs font-bold rounded-lg border border-purple-500/35 bg-purple-950/40 text-purple-300 hover:bg-purple-900/40 hover:border-purple-400 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-[0_0_12px_rgba(168,85,247,0.1)] flex items-center justify-center gap-1.5"
                   onClick={saveGeneratedTexture}
@@ -1018,7 +941,7 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
             <div style={styles.card}>
               <div className="flex justify-between items-center gap-2 mb-2">
                 <div className="text-xs font-extrabold text-slate-200 uppercase tracking-wide">
-                  Result Textures
+                  Result Texture
                 </div>
                 <div className="flex gap-1.5">
                   <button
@@ -1026,66 +949,34 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
                     onClick={importClothingTexture}
                     disabled={busy === 'import'}
                   >
-                    <Upload size={11} /> {busy === 'import' ? '…' : 'Import'}
+                    <Upload size={11} /> {busy === 'import' ? 'ΓÇª' : 'Import'}
                   </button>
-                  {activeSlotPaths.resultPath && (
+                  {workflow.resultPath && (
                     <button
                       className="px-2.5 py-1 text-[10px] font-bold rounded-md border border-white/[0.08] bg-white/[0.04] text-slate-400 hover:bg-white/[0.1] hover:text-slate-200 transition-all duration-200 cursor-pointer flex items-center gap-1"
                       onClick={removeResult}
                     >
-                      <Trash2 size={11} /> Clear {workflow.assetType === 'pants' ? 'Pants' : 'Shirt'}
+                      <Trash2 size={11} /> Clear
                     </button>
                   )}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="text-[10px] font-bold text-purple-400 uppercase tracking-wide mb-1.5">
-                    Shirt
+              {workflow.resultDataUrl ? (
+                <>
+                  <img
+                    src={workflow.resultDataUrl}
+                    alt="Classic clothing texture"
+                    className="w-full rounded-lg border border-white/5 shadow-inner"
+                  />
+                  <div className="text-[10px] text-slate-500 font-mono break-all leading-normal mt-2">
+                    {workflow.resultPath}
                   </div>
-                  {shirtSlotPaths.resultDataUrl ? (
-                    <>
-                      <img
-                        src={shirtSlotPaths.resultDataUrl}
-                        alt="Classic shirt texture"
-                        className="w-full rounded-lg border border-white/5 shadow-inner"
-                      />
-                      {shirtSlotPaths.resultPath && (
-                        <div className="text-[10px] text-slate-500 font-mono break-all leading-normal mt-2">
-                          {shirtSlotPaths.resultPath}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="text-xs text-slate-500 leading-relaxed font-medium">
-                      No shirt texture yet.
-                    </div>
-                  )}
+                </>
+              ) : (
+                <div className="text-xs text-slate-500 leading-relaxed font-medium">
+                  Generate with a provider or import your own finished PNG texture here.
                 </div>
-                <div>
-                  <div className="text-[10px] font-bold text-purple-400 uppercase tracking-wide mb-1.5">
-                    Pants
-                  </div>
-                  {pantsSlotPaths.resultDataUrl ? (
-                    <>
-                      <img
-                        src={pantsSlotPaths.resultDataUrl}
-                        alt="Classic pants texture"
-                        className="w-full rounded-lg border border-white/5 shadow-inner"
-                      />
-                      {pantsSlotPaths.resultPath && (
-                        <div className="text-[10px] text-slate-500 font-mono break-all leading-normal mt-2">
-                          {pantsSlotPaths.resultPath}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="text-xs text-slate-500 leading-relaxed font-medium">
-                      No pants texture yet.
-                    </div>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </div>

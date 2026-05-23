@@ -15,6 +15,59 @@ import {
   dataUrlToArrayBuffer,
   normName
 } from '../Modeling/r15Utils'
+import {
+  configureClassicClothingTexture,
+  createClassicClothingMaterial
+} from './classicClothingTexture.js'
+import {
+  prepareClassicClothingGeometry,
+  resolveClothingPartName
+} from './classicClothingUv.js'
+
+const CLOTHING_ASSET_TYPES = ['shirt', 'pants']
+
+function clothingAssetTypeLabel(type) {
+  if (type === 'pants') return 'Classic Pants'
+  return 'Classic Shirt'
+}
+
+function clothingSlotKeys(assetType) {
+  return assetType === 'pants'
+    ? { path: 'pantsResultPath', dataUrl: 'pantsResultDataUrl' }
+    : { path: 'shirtResultPath', dataUrl: 'shirtResultDataUrl' }
+}
+
+function getClothingSlotPaths(workflow, assetType) {
+  const { path, dataUrl } = clothingSlotKeys(assetType)
+  let resultPath = workflow?.[path] ?? null
+  let resultDataUrl = workflow?.[dataUrl] ?? null
+  if (!resultPath && !resultDataUrl && workflow) {
+    const legacyType = workflow.assetType || 'shirt'
+    if (legacyType === assetType && (workflow.resultPath || workflow.resultDataUrl)) {
+      resultPath = workflow.resultPath
+      resultDataUrl = workflow.resultDataUrl
+    }
+  }
+  return { resultPath, resultDataUrl }
+}
+
+function hasClothingSlot(workflow, assetType) {
+  const { resultPath, resultDataUrl } = getClothingSlotPaths(workflow, assetType)
+  return Boolean(resultPath || resultDataUrl)
+}
+
+function hasAnyClothingTexture(workflow) {
+  return hasClothingSlot(workflow, 'shirt') || hasClothingSlot(workflow, 'pants')
+}
+
+function clothingConnectionSummary(workflow) {
+  const hasShirt = hasClothingSlot(workflow, 'shirt')
+  const hasPants = hasClothingSlot(workflow, 'pants')
+  if (hasShirt && hasPants) return 'Shirt and pants textures ready'
+  if (hasShirt) return 'Classic Shirt texture ready'
+  if (hasPants) return 'Classic Pants texture ready'
+  return null
+}
 
 const categoryStyles = {
   animation: {
@@ -75,6 +128,10 @@ const DEFAULT_CLOTHING_WORKFLOW = {
   styleNotes: '',
   templateImagePath: null,
   templateDataUrl: null,
+  shirtResultPath: null,
+  shirtResultDataUrl: null,
+  pantsResultPath: null,
+  pantsResultDataUrl: null,
   resultPath: null,
   resultDataUrl: null,
   seed: '',
@@ -88,10 +145,10 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
 
   const animationResult = workflowState?.animationResult || null
   const clothingWorkflow = workflowState?.clothingWorkflow || null
-  const hasClothingTexture = Boolean(
-    clothingWorkflow?.resultDataUrl || clothingWorkflow?.resultPath
-  )
-  const activeClothing = hasClothingTexture ? clothingWorkflow : null
+  const hasShirtTexture = hasClothingSlot(clothingWorkflow, 'shirt')
+  const hasPantsTexture = hasClothingSlot(clothingWorkflow, 'pants')
+  const hasClothingTexture = hasAnyClothingTexture(clothingWorkflow)
+  const activeAssetType = clothingWorkflow?.assetType || 'shirt'
   const accessories = useMemo(
     () => (workflowState?.charParts || []).filter((part) => part.status === 'done' && part.dataUrl),
     [workflowState]
@@ -137,14 +194,12 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
     {
       id: 'clothing',
       title: 'Clothing Node',
-      ready: Boolean(activeClothing),
+      ready: hasClothingTexture,
       accent: '#38bdf8',
       actionLabel: 'Open Clothing',
-      summary: activeClothing?.resultDataUrl
-        ? `Classic ${activeClothing.assetType || 'shirt'} texture is ready for the avatar overlay.`
-        : activeClothing?.resultPath
-          ? 'Classic clothing file connected — loading texture preview…'
-          : 'No classic clothing texture connected yet.'
+      summary: clothingConnectionSummary(clothingWorkflow)
+        ? `${clothingConnectionSummary(clothingWorkflow)} for the avatar overlay.`
+        : 'No classic clothing texture connected yet.'
     },
     {
       id: 'modeling',
@@ -200,20 +255,34 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
 
   useEffect(() => {
     const workflow = clothingWorkflow
-    if (!workflow?.resultPath || workflow.resultDataUrl) return undefined
+    if (!workflow) return undefined
     let cancelled = false
 
-    async function hydrateClothingTexture() {
-      const result = await window.api.readFileAsDataURL({ filePath: workflow.resultPath })
+    async function hydrateSlot(assetType) {
+      const { path, dataUrl } = clothingSlotKeys(assetType)
+      const slotPaths = getClothingSlotPaths(workflow, assetType)
+      if (!slotPaths.resultPath || slotPaths.resultDataUrl || workflow[dataUrl]) return
+
+      const result = await window.api.readFileAsDataURL({ filePath: slotPaths.resultPath })
       if (cancelled || !result.success) return
-      updateClothingWorkflow({ resultDataUrl: result.dataUrl })
+      updateClothingWorkflow({ [dataUrl]: result.dataUrl })
     }
 
-    hydrateClothingTexture().catch(() => {})
+    hydrateSlot('shirt').catch(() => {})
+    hydrateSlot('pants').catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [clothingWorkflow?.resultPath, clothingWorkflow?.resultDataUrl, updateClothingWorkflow])
+  }, [
+    clothingWorkflow?.shirtResultPath,
+    clothingWorkflow?.shirtResultDataUrl,
+    clothingWorkflow?.pantsResultPath,
+    clothingWorkflow?.pantsResultDataUrl,
+    clothingWorkflow?.resultPath,
+    clothingWorkflow?.resultDataUrl,
+    clothingWorkflow?.assetType,
+    updateClothingWorkflow
+  ])
 
   const importClothingTexture = useCallback(async () => {
     setClothingBusy('import')
@@ -228,23 +297,38 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
       setClothingNotice(result.error || 'Could not load clothing image.')
       return
     }
-    updateClothingWorkflow({
-      resultPath: filePath,
-      resultDataUrl: result.dataUrl,
+    const slot = clothingWorkflow?.assetType || 'shirt'
+    const { path, dataUrl } = clothingSlotKeys(slot)
+    const changes = {
+      assetType: slot,
+      [path]: filePath,
+      [dataUrl]: result.dataUrl,
       lastPrompt: ''
-    })
+    }
+    if ((clothingWorkflow?.assetType || 'shirt') === slot) {
+      changes.resultPath = filePath
+      changes.resultDataUrl = result.dataUrl
+    }
+    updateClothingWorkflow(changes)
     setPreviewTab('clothes')
-    setClothingNotice('Clothing texture imported.')
-  }, [updateClothingWorkflow])
+    setClothingNotice(`${clothingAssetTypeLabel(slot)} texture imported.`)
+  }, [clothingWorkflow?.assetType, updateClothingWorkflow])
 
   const clearClothingTexture = useCallback(() => {
-    updateClothingWorkflow({
-      resultPath: null,
-      resultDataUrl: null,
+    const slot = clothingWorkflow?.assetType || 'shirt'
+    const { path, dataUrl } = clothingSlotKeys(slot)
+    const changes = {
+      [path]: null,
+      [dataUrl]: null,
       lastPrompt: ''
-    })
-    setClothingNotice('Clothing texture cleared.')
-  }, [updateClothingWorkflow])
+    }
+    if ((clothingWorkflow?.assetType || 'shirt') === slot) {
+      changes.resultPath = null
+      changes.resultDataUrl = null
+    }
+    updateClothingWorkflow(changes)
+    setClothingNotice(`${clothingAssetTypeLabel(slot)} texture cleared.`)
+  }, [clothingWorkflow?.assetType, updateClothingWorkflow])
 
   useEffect(() => {
     if (!clothingNotice) return undefined
@@ -285,11 +369,7 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
                 Connected clothing
               </div>
               <div className="text-base font-bold text-white mb-1.5">
-                {activeClothing?.resultDataUrl
-                  ? `Classic ${activeClothing.assetType || 'shirt'} ready`
-                  : activeClothing?.resultPath
-                    ? 'Loading clothing texture…'
-                    : 'No clothing texture yet'}
+                {clothingConnectionSummary(clothingWorkflow) || 'No clothing texture yet'}
               </div>
             </div>
             <button
@@ -300,9 +380,8 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
             </button>
           </div>
           <div className="text-xs text-slate-400 leading-relaxed">
-            {activeClothing?.resultDataUrl
-              ? 'The texture is projected onto the rig as an overlay so you can judge seams and silhouette while the character animates.'
-              : 'Import a finished PNG here or generate one in Clothing Studio to preview it on the rig.'}
+            Roblox outfits use separate 585×559 shirt and pants template PNGs. Import both for a
+            full outfit preview on the R15 rig.
           </div>
 
           <button
@@ -315,18 +394,18 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
           </button>
 
           <div className="flex gap-2 mt-3 flex-wrap">
-            {activeClothing?.resultDataUrl && (
+            {(hasShirtTexture || hasPantsTexture) && (
               <button
                 className="px-3 py-2 text-xs font-semibold rounded-xl border border-white/5 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05] hover:border-white/10 transition-all duration-200 cursor-pointer flex items-center gap-1.5"
                 onClick={clearClothingTexture}
               >
-                <Trash2 size={12} /> Clear
+                <Trash2 size={12} /> Clear {clothingAssetTypeLabel(activeAssetType)}
               </button>
             )}
           </div>
 
           <div className="flex gap-2 mt-3">
-            {['shirt', 'pants'].map((type) => {
+            {CLOTHING_ASSET_TYPES.map((type) => {
               const active = (clothingWorkflow?.assetType || 'shirt') === type
               return (
                 <button
@@ -338,7 +417,7 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
                   }`}
                   onClick={() => updateClothingWorkflow({ assetType: type })}
                 >
-                  {type === 'shirt' ? 'Classic Shirt' : 'Classic Pants'}
+                  {clothingAssetTypeLabel(type)}
                 </button>
               )
             })}
@@ -350,12 +429,33 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
             </div>
           )}
 
-          {activeClothing?.resultDataUrl && (
-            <img
-              src={activeClothing.resultDataUrl}
-              alt="Connected classic clothing texture"
-              className="w-full mt-3 rounded-xl border border-white/5 shadow-lg shadow-black/25 hover:border-white/10 transition-all duration-300"
-            />
+          {(hasShirtTexture || hasPantsTexture) && (
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              {hasShirtTexture && (
+                <div>
+                  <div className="text-[10px] font-bold text-sky-400 uppercase tracking-wide mb-1">
+                    Shirt
+                  </div>
+                  <img
+                    src={getClothingSlotPaths(clothingWorkflow, 'shirt').resultDataUrl}
+                    alt="Connected classic shirt texture"
+                    className="w-full rounded-xl border border-white/5 shadow-lg shadow-black/25 hover:border-white/10 transition-all duration-300"
+                  />
+                </div>
+              )}
+              {hasPantsTexture && (
+                <div>
+                  <div className="text-[10px] font-bold text-sky-400 uppercase tracking-wide mb-1">
+                    Pants
+                  </div>
+                  <img
+                    src={getClothingSlotPaths(clothingWorkflow, 'pants').resultDataUrl}
+                    alt="Connected classic pants texture"
+                    className="w-full rounded-xl border border-white/5 shadow-lg shadow-black/25 hover:border-white/10 transition-all duration-300"
+                  />
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -441,7 +541,7 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
             <div className="flex gap-1.5 bg-white/[0.02] p-1 rounded-xl border border-white/5">
               {PREVIEW_TABS.map((tab) => {
                 const active = previewTab === tab.id
-                const clothesConnected = tab.id === 'clothes' && activeClothing?.resultDataUrl
+                const clothesConnected = tab.id === 'clothes' && hasClothingTexture
                 return (
                   <button
                     key={tab.id}
@@ -476,12 +576,12 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
                   {clothingBusy === 'import' ? 'Importing…' : 'Import PNG'}
                 </button>
               )}
-              {previewTab === 'clothes' && activeClothing?.resultDataUrl && (
+              {previewTab === 'clothes' && hasClothingTexture && (
                 <button
                   className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-white/5 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05] hover:border-white/10 transition-all duration-200 cursor-pointer flex items-center gap-1.5"
                   onClick={clearClothingTexture}
                 >
-                  <Trash2 size={12} /> Clear
+                  <Trash2 size={12} /> Clear {clothingAssetTypeLabel(activeAssetType)}
                 </button>
               )}
             </div>
@@ -492,15 +592,16 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
           <WorkflowViewport
             previewTab={previewTab}
             animationResult={animationResult}
-            clothingAsset={activeClothing}
+            clothingWorkflow={clothingWorkflow}
             accessories={accessories}
             envParts={envParts}
           />
 
           {previewTab === 'clothes' && (
             <ClothesTabOverlay
-              clothingAsset={activeClothing}
               clothingWorkflow={clothingWorkflow}
+              hasShirtTexture={hasShirtTexture}
+              hasPantsTexture={hasPantsTexture}
               clothingBusy={clothingBusy}
               clothingNotice={clothingNotice}
               onImport={importClothingTexture}
@@ -516,8 +617,9 @@ export default function PlaygroundModule({ workflowState, setWorkflowState, onCh
 }
 
 function ClothesTabOverlay({
-  clothingAsset,
   clothingWorkflow,
+  hasShirtTexture,
+  hasPantsTexture,
   clothingBusy,
   clothingNotice,
   onImport,
@@ -526,6 +628,7 @@ function ClothesTabOverlay({
   onOpenClothing
 }) {
   const assetType = clothingWorkflow?.assetType || 'shirt'
+  const activeSlot = getClothingSlotPaths(clothingWorkflow, assetType)
 
   return (
     <div className="absolute bottom-4 right-4 w-[280px] max-w-[calc(100%-2rem)] pointer-events-auto">
@@ -535,22 +638,36 @@ function ClothesTabOverlay({
             <Shirt size={13} /> Clothes Preview
           </div>
           <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-sky-500/25 text-sky-400 bg-sky-950/40">
-            {assetType}
+            {clothingAssetTypeLabel(assetType)}
           </span>
         </div>
 
         <div className="text-[11px] text-slate-400 leading-relaxed mb-3">
-          Import a classic Roblox shirt or pants PNG to preview it on the R15 rig. The 3D viewport
-          applies the texture as a skinned overlay on torso, arms, or legs.
+          Roblox uses separate 585×559 templates: <strong className="text-sky-300">shirt</strong>{' '}
+          (torso + arms) and <strong className="text-sky-300">pants</strong> (torso + legs). Import
+          each PNG into its slot — they stack on the rig for a full outfit.
         </div>
 
-        <div className="flex gap-2 mb-3">
-          {['shirt', 'pants'].map((type) => {
+        {hasShirtTexture &&
+          hasPantsTexture &&
+          getClothingSlotPaths(clothingWorkflow, 'shirt').resultDataUrl &&
+          getClothingSlotPaths(clothingWorkflow, 'shirt').resultDataUrl ===
+            getClothingSlotPaths(clothingWorkflow, 'pants').resultDataUrl && (
+            <div className="mb-3 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-200 text-[11px] leading-relaxed">
+              Shirt and pants are the same file. The pants slot needs the{' '}
+              <strong>pants template</strong> PNG (legs layout), not the shirt template — otherwise
+              legs will show scrambled guide/logo regions.
+            </div>
+          )}
+
+        <div className="flex gap-2 mb-3 flex-wrap">
+          {CLOTHING_ASSET_TYPES.map((type) => {
             const active = assetType === type
+            const loaded = type === 'shirt' ? hasShirtTexture : hasPantsTexture
             return (
               <button
                 key={type}
-                className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all duration-200 cursor-pointer ${
+                className={`flex-1 min-w-[72px] py-1.5 text-[10px] font-bold rounded-lg border transition-all duration-200 cursor-pointer ${
                   active
                     ? 'bg-sky-950/40 border-sky-500/30 text-sky-300'
                     : 'border-white/5 bg-white/[0.02] text-slate-400 hover:text-slate-200 hover:border-white/10'
@@ -558,6 +675,9 @@ function ClothesTabOverlay({
                 onClick={() => onAssetTypeChange(type)}
               >
                 {type === 'shirt' ? 'Shirt' : 'Pants'}
+                {loaded && (
+                  <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-sky-400 align-middle" />
+                )}
               </button>
             )
           })}
@@ -570,9 +690,9 @@ function ClothesTabOverlay({
             disabled={clothingBusy === 'import'}
           >
             <Upload size={12} />
-            {clothingBusy === 'import' ? 'Importing…' : 'Import PNG'}
+            {clothingBusy === 'import' ? 'Importing…' : `Import ${assetType === 'pants' ? 'Pants' : 'Shirt'} PNG`}
           </button>
-          {clothingAsset?.resultDataUrl && (
+          {activeSlot.resultDataUrl && (
             <button
               className="px-3 py-2 text-xs font-semibold rounded-xl border border-white/5 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05] hover:border-white/10 transition-all duration-200 cursor-pointer flex items-center gap-1.5"
               onClick={onClear}
@@ -588,25 +708,44 @@ function ClothesTabOverlay({
           </div>
         )}
 
-        {clothingAsset?.resultDataUrl ? (
-          <div>
-            <img
-              src={clothingAsset.resultDataUrl}
-              alt="Imported classic clothing texture"
-              className="w-full rounded-xl border border-white/5 shadow-inner"
-            />
-            {clothingAsset.resultPath && (
-              <div className="text-[10px] text-slate-500 font-mono break-all leading-normal mt-2">
-                {clothingAsset.resultPath}
+        {(hasShirtTexture || hasPantsTexture) ? (
+          <div className="space-y-2">
+            {hasShirtTexture && (
+              <div>
+                <div className="text-[10px] font-bold text-sky-400 uppercase tracking-wide mb-1">
+                  Shirt
+                </div>
+                <img
+                  src={getClothingSlotPaths(clothingWorkflow, 'shirt').resultDataUrl}
+                  alt="Imported classic shirt texture"
+                  className="w-full rounded-xl border border-white/5 shadow-inner"
+                />
+              </div>
+            )}
+            {hasPantsTexture && (
+              <div>
+                <div className="text-[10px] font-bold text-sky-400 uppercase tracking-wide mb-1">
+                  Pants
+                </div>
+                <img
+                  src={getClothingSlotPaths(clothingWorkflow, 'pants').resultDataUrl}
+                  alt="Imported classic pants texture"
+                  className="w-full rounded-xl border border-white/5 shadow-inner"
+                />
+              </div>
+            )}
+            {activeSlot.resultPath && (
+              <div className="text-[10px] text-slate-500 font-mono break-all leading-normal">
+                {activeSlot.resultPath}
               </div>
             )}
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-sky-500/20 bg-sky-950/10 px-3 py-8 text-center">
             <Shirt size={28} className="mx-auto text-sky-400/70 mb-2" />
-            <p className="text-sm font-bold text-sky-200">No clothing texture yet</p>
+            <p className="text-sm font-bold text-sky-200">No clothing textures yet</p>
             <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-              Import a finished PNG or generate one in Clothing Studio.
+              Import shirt and pants PNGs separately, or generate them in Clothing Studio.
             </p>
             <button
               className="mt-4 w-full px-4 py-2.5 text-xs font-bold rounded-xl border border-sky-500/30 bg-sky-950/40 text-sky-200 hover:bg-sky-900/50 hover:border-sky-400/50 transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5"
@@ -629,7 +768,7 @@ function ClothesTabOverlay({
   )
 }
 
-function WorkflowViewport({ previewTab, animationResult, clothingAsset, accessories, envParts }) {
+function WorkflowViewport({ previewTab, animationResult, clothingWorkflow, accessories, envParts }) {
   const mountRef = useRef(null)
   const stateRef = useRef({})
   const previewTabRef = useRef(previewTab)
@@ -638,7 +777,8 @@ function WorkflowViewport({ previewTab, animationResult, clothingAsset, accessor
   const [playing, setPlaying] = useState(true)
   const [status, setStatus] = useState({ rig: false, motion: false, clothing: false, error: null })
   const clothesFocus = previewTab === 'clothes'
-  const clothingPreviewSrc = clothingAsset?.resultDataUrl || null
+  const hasShirtTexture = hasClothingSlot(clothingWorkflow, 'shirt')
+  const hasPantsTexture = hasClothingSlot(clothingWorkflow, 'pants')
   const visibleAccessories = clothesFocus ? [] : accessories
   const visibleEnvParts = clothesFocus ? [] : envParts
 
@@ -877,54 +1017,68 @@ function WorkflowViewport({ previewTab, animationResult, clothingAsset, accessor
     let cancelled = false
 
     async function applyClothingOverlays() {
-      const textureSource = await resolveClothingTextureSource(clothingAsset)
+      const shirtSource = await resolveClothingSlotTextureSource(clothingWorkflow, 'shirt')
+      const pantsSource = await resolveClothingSlotTextureSource(clothingWorkflow, 'pants')
       if (cancelled) return
 
-      if (!textureSource) {
+      if (!shirtSource && !pantsSource) {
         setStatus((prev) => ({ ...prev, clothing: false }))
-        if (previewTabRef.current === 'clothes') focusClothingScene(s, clothingAsset?.assetType)
+        if (previewTabRef.current === 'clothes') focusClothingScene(s, clothingWorkflow)
         else focusScene(s)
         return
       }
 
       const textureLoader = new THREE.TextureLoader()
-      textureLoader.load(
-        textureSource,
-        (texture) => {
-          if (cancelled) {
-            texture.dispose()
-            return
-          }
+      const overlays = []
 
-          texture.colorSpace = THREE.SRGBColorSpace
-          texture.flipY = true
-          texture.needsUpdate = true
+      async function loadSlotTexture(source, assetType, renderOrderOffset) {
+        return new Promise((resolve) => {
+          textureLoader.load(
+            source,
+            (texture) => {
+              if (cancelled) {
+                texture.dispose()
+                resolve([])
+                return
+              }
 
-          const overlays = applyClothingTextureToRig(s, texture, clothingAsset?.assetType)
-          s.clothingOverlays = overlays
-          setStatus((prev) => ({
-            ...prev,
-            clothing: overlays.length > 0,
-            error: overlays.length > 0 ? null : prev.error
-          }))
+              configureClassicClothingTexture(texture)
+              const slotOverlays = applyClothingTextureToRig(
+                s,
+                texture,
+                assetType,
+                renderOrderOffset
+              )
+              overlays.push(...slotOverlays)
+              resolve(slotOverlays)
+            },
+            undefined,
+            () => resolve([])
+          )
+        })
+      }
 
-          if (import.meta.env.DEV && overlays.length === 0) {
-            console.warn('[Playground] Clothing texture loaded but no R15 body meshes matched.', {
-              assetType: clothingAsset?.assetType || 'shirt'
-            })
-          }
+      if (shirtSource) await loadSlotTexture(shirtSource, 'shirt', 1)
+      if (pantsSource) await loadSlotTexture(pantsSource, 'pants', 2)
 
-          if (previewTabRef.current === 'clothes') focusClothingScene(s, clothingAsset?.assetType)
-          else focusScene(s)
-        },
-        undefined,
-        (err) =>
-          setStatus((prev) => ({
-            ...prev,
-            clothing: false,
-            error: `Clothing overlay failed: ${err.message}`
-          }))
-      )
+      if (cancelled) {
+        clearClothingOverlays(s)
+        return
+      }
+
+      s.clothingOverlays = overlays
+      setStatus((prev) => ({
+        ...prev,
+        clothing: overlays.length > 0,
+        error: overlays.length > 0 ? null : prev.error
+      }))
+
+      if (import.meta.env.DEV && overlays.length === 0) {
+        console.warn('[Playground] Clothing textures loaded but no R15 body meshes matched.')
+      }
+
+      if (previewTabRef.current === 'clothes') focusClothingScene(s, clothingWorkflow)
+      else focusScene(s)
     }
 
     applyClothingOverlays().catch((err) => {
@@ -939,14 +1093,23 @@ function WorkflowViewport({ previewTab, animationResult, clothingAsset, accessor
     return () => {
       cancelled = true
     }
-  }, [clothingAsset?.assetType, clothingAsset?.resultDataUrl, clothingAsset?.resultPath, rigReady])
+  }, [
+    clothingWorkflow?.shirtResultDataUrl,
+    clothingWorkflow?.shirtResultPath,
+    clothingWorkflow?.pantsResultDataUrl,
+    clothingWorkflow?.pantsResultPath,
+    clothingWorkflow?.resultDataUrl,
+    clothingWorkflow?.resultPath,
+    clothingWorkflow?.assetType,
+    rigReady
+  ])
 
   useEffect(() => {
     const s = stateRef.current
     if (!s.rigScene) return
-    if (clothesFocus) focusClothingScene(s, clothingAsset?.assetType)
+    if (clothesFocus) focusClothingScene(s, clothingWorkflow)
     else focusScene(s)
-  }, [clothesFocus, rigReady, clothingAsset?.assetType])
+  }, [clothesFocus, rigReady, clothingWorkflow])
 
   useEffect(() => {
     const s = stateRef.current
@@ -1004,11 +1167,11 @@ function WorkflowViewport({ previewTab, animationResult, clothingAsset, accessor
         s.playing = true
         setPlaying(true)
         setStatus((prev) => ({ ...prev, motion: true, error: null }))
-        if (clothesFocus) focusClothingScene(s, clothingAsset?.assetType)
+        if (clothesFocus) focusClothingScene(s, clothingWorkflow)
         else focusScene(s)
       })
       .catch((err) => setStatus((prev) => ({ ...prev, motion: false, error: err.message })))
-  }, [animationResult?.bvhPath, rigReady, clothesFocus, clothingAsset?.assetType])
+  }, [animationResult?.bvhPath, rigReady, clothesFocus, clothingWorkflow])
 
   function togglePlayback() {
     const s = stateRef.current
@@ -1020,7 +1183,7 @@ function WorkflowViewport({ previewTab, animationResult, clothingAsset, accessor
 
   function focusCurrentScene() {
     const s = stateRef.current
-    if (clothesFocus) focusClothingScene(s, clothingAsset?.assetType)
+    if (clothesFocus) focusClothingScene(s, clothingWorkflow)
     else focusScene(s)
   }
 
@@ -1077,27 +1240,48 @@ function WorkflowViewport({ previewTab, animationResult, clothingAsset, accessor
         </div>
       )}
 
-      {previewTab === 'clothes' && clothingPreviewSrc && (
+      {previewTab === 'clothes' && (hasShirtTexture || hasPantsTexture) && (
         <div className="absolute top-16 left-4 z-10 pointer-events-none max-w-[min(380px,44vw)]">
           <div className="bg-[#0a0c14]/90 border border-sky-500/25 rounded-2xl p-3 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-xl">
             <div className="text-[10px] font-bold text-sky-300 uppercase tracking-wide mb-2">
               2D Clothing Preview
             </div>
-            <img
-              src={clothingPreviewSrc}
-              alt="Classic clothing texture preview"
-              className="w-full max-h-[min(52vh,520px)] object-contain rounded-xl border border-white/10 bg-black/20"
-            />
+            <div className="grid grid-cols-2 gap-2">
+              {hasShirtTexture && (
+                <div>
+                  <div className="text-[9px] font-bold text-sky-400 uppercase tracking-wide mb-1">
+                    Shirt
+                  </div>
+                  <img
+                    src={getClothingSlotPaths(clothingWorkflow, 'shirt').resultDataUrl}
+                    alt="Classic shirt texture preview"
+                    className="w-full max-h-[min(40vh,360px)] object-contain rounded-xl border border-white/10 bg-black/20"
+                  />
+                </div>
+              )}
+              {hasPantsTexture && (
+                <div>
+                  <div className="text-[9px] font-bold text-sky-400 uppercase tracking-wide mb-1">
+                    Pants
+                  </div>
+                  <img
+                    src={getClothingSlotPaths(clothingWorkflow, 'pants').resultDataUrl}
+                    alt="Classic pants texture preview"
+                    className="w-full max-h-[min(40vh,360px)] object-contain rounded-xl border border-white/10 bg-black/20"
+                  />
+                </div>
+              )}
+            </div>
             {!status.clothing && status.rig && (
               <p className="text-[10px] text-amber-300/90 mt-2 leading-relaxed">
-                Texture loaded — applying 3D overlay to the R15 rig…
+                Textures loaded — applying 3D overlays to the R15 rig…
               </p>
             )}
           </div>
         </div>
       )}
 
-      {previewTab === 'clothes' && !clothingPreviewSrc && !clothingAsset?.resultPath && (
+      {previewTab === 'clothes' && !hasShirtTexture && !hasPantsTexture && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-6 text-center select-none">
           <div className="bg-slate-950/40 border border-sky-500/15 backdrop-blur-lg rounded-3xl p-6 max-w-sm shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
             <Shirt size={32} className="mx-auto text-sky-400/80 mb-3" />
@@ -1105,24 +1289,29 @@ function WorkflowViewport({ previewTab, animationResult, clothingAsset, accessor
               Import clothing to preview
             </p>
             <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-              Click <strong className="text-sky-300">Import PNG</strong> above or in the panel
-              below to load a classic Roblox shirt or pants texture onto the R15 rig.
+              Import separate 585×559 shirt and pants template PNGs to preview a full Roblox outfit
+              on the R15 rig.
             </p>
           </div>
         </div>
       )}
 
-      {previewTab === 'clothes' && !clothingPreviewSrc && clothingAsset?.resultPath && (
+      {previewTab === 'clothes' &&
+        !getClothingSlotPaths(clothingWorkflow, 'shirt').resultDataUrl &&
+        !getClothingSlotPaths(clothingWorkflow, 'pants').resultDataUrl &&
+        (getClothingSlotPaths(clothingWorkflow, 'shirt').resultPath ||
+          getClothingSlotPaths(clothingWorkflow, 'pants').resultPath) && (
         <div className="absolute top-16 left-4 z-10 pointer-events-none">
           <div className="bg-[#0a0c14]/90 border border-sky-500/20 rounded-2xl px-4 py-3 text-xs text-sky-300 backdrop-blur-xl">
-            Loading clothing texture…
+            Loading clothing textures…
           </div>
         </div>
       )}
 
       {previewTab === 'overview' &&
         !animationResult?.bvhPath &&
-        !clothingAsset?.resultDataUrl &&
+        !hasShirtTexture &&
+        !hasPantsTexture &&
         accessories.length === 0 &&
         envParts.length === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-6 text-center select-none">
@@ -1151,41 +1340,36 @@ function layoutEnvironment(state) {
   }
 }
 
-async function resolveClothingTextureSource(clothingAsset) {
-  if (!clothingAsset) return null
-  if (clothingAsset.resultDataUrl) return clothingAsset.resultDataUrl
-  if (!clothingAsset.resultPath || !window.api?.readFileAsDataURL) return null
-  const result = await window.api.readFileAsDataURL({ filePath: clothingAsset.resultPath })
+async function resolveClothingSlotTextureSource(workflow, assetType) {
+  if (!workflow) return null
+  const { resultPath, resultDataUrl } = getClothingSlotPaths(workflow, assetType)
+  if (resultDataUrl) return resultDataUrl
+  if (!resultPath || !window.api?.readFileAsDataURL) return null
+  const result = await window.api.readFileAsDataURL({ filePath: resultPath })
   return result.success ? result.dataUrl : null
 }
 
-function applyClothingTextureToRig(state, texture, assetType) {
+function applyClothingTextureToRig(state, texture, assetType, renderOrderOffset = 1) {
   if (!state?.rigScene || !texture) return []
 
   const overlays = []
   state.rigScene.traverse((obj) => {
     if (!isClothingBodyMesh(obj) || !isClothingTargetMesh(obj, assetType)) return
 
-    const overlayMaterial = new THREE.MeshStandardMaterial({
-      map: texture,
-      transparent: true,
-      alphaTest: 0.05,
-      depthWrite: false,
-      depthTest: true,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1
-    })
-
-    const overlayMesh = obj.clone()
-    overlayMesh.material = overlayMaterial
-    overlayMesh.name = `__clothing_overlay_${assetType || 'shirt'}_${obj.name}`
-    overlayMesh.renderOrder = (obj.renderOrder || 0) + 1
-    overlayMesh.castShadow = false
-    overlayMesh.receiveShadow = false
-    overlayMesh.frustumCulled = false
-    obj.parent?.add(overlayMesh)
-    overlays.push({ mesh: overlayMesh, material: overlayMaterial, texture })
+    const partName = resolveClothingPartName(obj)
+    const geometry = prepareClassicClothingGeometry(obj.geometry, assetType, partName)
+    const material = createClassicClothingMaterial(texture)
+    const overlay = new THREE.Mesh(geometry, material)
+    overlay.name = `__clothing_overlay_${assetType || 'shirt'}_${obj.name}`
+    overlay.renderOrder = (obj.renderOrder || 0) + renderOrderOffset
+    overlay.castShadow = false
+    overlay.receiveShadow = false
+    overlay.frustumCulled = false
+    overlay.position.copy(obj.position)
+    overlay.quaternion.copy(obj.quaternion)
+    overlay.scale.copy(obj.scale)
+    obj.parent?.add(overlay)
+    overlays.push({ mesh: overlay, material, geometry, texture })
   })
 
   return overlays
@@ -1195,13 +1379,21 @@ function isClothingBodyMesh(obj) {
   return Boolean(obj?.isMesh && !obj.name.startsWith('__clothing_overlay_'))
 }
 
-function focusClothingScene(state, assetType = 'shirt') {
+function focusClothingScene(state, clothingWorkflow) {
   if (!state?.camera || !state?.orbit || !state?.rigScene) return
+
+  const activeAssetTypes = []
+  if (hasClothingSlot(clothingWorkflow, 'shirt')) activeAssetTypes.push('shirt')
+  if (hasClothingSlot(clothingWorkflow, 'pants')) activeAssetTypes.push('pants')
+  if (activeAssetTypes.length === 0) {
+    focusScene(state)
+    return
+  }
 
   const bounds = new THREE.Box3()
   state.rigScene.traverse((obj) => {
     if (!isClothingBodyMesh(obj)) return
-    if (!isClothingTargetMesh(obj, assetType)) return
+    if (!activeAssetTypes.some((assetType) => isClothingTargetMesh(obj, assetType))) return
     bounds.expandByObject(obj)
   })
 
@@ -1239,10 +1431,15 @@ function clearClothingOverlays(state) {
     return
   }
 
+  const disposedTextures = new Set()
   for (const overlay of state.clothingOverlays) {
     overlay.mesh.parent?.remove(overlay.mesh)
-    overlay.material.dispose()
-    overlay.texture?.dispose()
+    overlay.material?.dispose()
+    overlay.geometry?.dispose()
+    if (overlay.texture && !disposedTextures.has(overlay.texture)) {
+      overlay.texture.dispose()
+      disposedTextures.add(overlay.texture)
+    }
   }
   state.clothingOverlays = []
 }
@@ -1256,14 +1453,18 @@ function isClothingTargetName(name, assetType) {
   const normalized = normName(name)
   if (!normalized) return false
 
+  const isLowerTorso = normalized.includes('lowertorso')
   const isTorso = normalized.includes('torso')
   const isArm = normalized.includes('arm')
   const isHand = normalized.includes('hand')
   const isLeg = normalized.includes('leg') || normalized.includes('foot')
 
-  if ((assetType || 'shirt') === 'pants') {
-    return normalized.includes('lowertorso') || isLeg
+  const mode = assetType || 'shirt'
+
+  if (mode === 'pants') {
+    return isLowerTorso || isLeg
   }
 
+  // Classic shirt: torso + arms only (no legs)
   return isTorso || isArm || isHand
 }
