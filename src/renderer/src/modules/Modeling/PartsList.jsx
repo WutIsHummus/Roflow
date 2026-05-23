@@ -68,6 +68,7 @@ export default function PartsList({
   onGenerate,
   onPartChange,
   onImportMesh,
+  onOptimize,
   showAttachPoint,
   tripoAssets = [],
   onAddTripoAsset,
@@ -336,6 +337,7 @@ export default function PartsList({
               onDuplicate={() => onDuplicate?.(part.id)}
               onGenerate={() => onGenerate(part.id)}
               onPartChange={(ch) => onPartChange(part.id, ch)}
+              onOptimize={() => onOptimize?.(part.id)}
               showAttachPoint={showAttachPoint}
             />
           ))
@@ -406,10 +408,13 @@ function TripoAssetCard({ asset, onAdd, actionLabel }) {
   )
 }
 
-function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange, showAttachPoint }) {
+function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange, onOptimize, showAttachPoint }) {
   const [focusPrompt, setFocusPrompt] = useState(false)
   const [focusName, setFocusName] = useState(false)
   const [imageMode, setImageMode] = useState(Boolean(part.imagePath))
+  const [multiviewMode, setMultiviewMode] = useState(Boolean(part.multiviewImages?.some(Boolean)))
+
+  const MULTIVIEW_SLOTS = ['Front', 'Back', 'Left', 'Right']
 
   const STATUS = {
     pending:    { color: '#555b6e', label: 'Pending' },
@@ -419,7 +424,8 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
   }
   const st = STATUS[part.status || 'pending']
   const busy = part.status === 'generating'
-  const canGen = ((part.prompt || '').trim().length > 0 || Boolean(part.imagePath)) && !busy
+  const hasMultiview = multiviewMode && part.multiviewImages?.some(Boolean)
+  const canGen = ((part.prompt || '').trim().length > 0 || Boolean(part.imagePath) || hasMultiview) && !busy
 
   async function pickReferenceImage() {
     if (!window.api?.openImage) return
@@ -432,6 +438,40 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
   function clearReferenceImage() {
     onPartChange({ imagePath: null })
     if (!(part.prompt || '').trim()) setImageMode(false)
+  }
+
+  async function pickMultiviewImage(slotIndex) {
+    if (!window.api?.openImage) return
+    const filePath = await window.api.openImage()
+    if (!filePath) return
+    const updated = [...(part.multiviewImages || [null, null, null, null])]
+    updated[slotIndex] = filePath
+    onPartChange({ multiviewImages: updated })
+  }
+
+  function clearMultiviewSlot(slotIndex) {
+    const updated = [...(part.multiviewImages || [null, null, null, null])]
+    updated[slotIndex] = null
+    onPartChange({ multiviewImages: updated })
+    if (!updated.some(Boolean) && !(part.prompt || '').trim()) setMultiviewMode(false)
+  }
+
+  function toggleImageMode() {
+    if (multiviewMode) {
+      setMultiviewMode(false)
+      onPartChange({ multiviewImages: [] })
+    }
+    setImageMode(v => !v)
+  }
+
+  function toggleMultiviewMode() {
+    if (imageMode) {
+      setImageMode(false)
+      onPartChange({ imagePath: null })
+    }
+    const next = !multiviewMode
+    setMultiviewMode(next)
+    if (!next) onPartChange({ multiviewImages: [] })
   }
 
   return (
@@ -532,27 +572,47 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
         }}
       />
 
-      {/* Image mode toggle + reference image */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        <button
-          onClick={() => setImageMode(v => !v)}
-          style={{
-            background: imageMode ? 'rgba(124,58,237,0.18)' : '#12151d',
-            border: imageMode ? '1px solid rgba(124,58,237,0.45)' : '1px solid #1e2330',
-            borderRadius: 6,
-            padding: '4px 9px',
-            fontSize: 10,
-            fontWeight: 700,
-            color: imageMode ? '#c4b5fd' : '#555b6e',
-            cursor: 'pointer',
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase'
-          }}
-        >
-          🖼 Image-to-3D
-        </button>
-        {imageMode && (
-          <>
+      {/* Image mode toggle + multiview + reference image */}
+      <div style={{ marginTop: 8 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            onClick={toggleImageMode}
+            style={{
+              background: imageMode ? 'rgba(124,58,237,0.18)' : '#12151d',
+              border: imageMode ? '1px solid rgba(124,58,237,0.45)' : '1px solid #1e2330',
+              borderRadius: 6,
+              padding: '4px 9px',
+              fontSize: 10,
+              fontWeight: 700,
+              color: imageMode ? '#c4b5fd' : '#555b6e',
+              cursor: 'pointer',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase'
+            }}
+          >
+            🖼 Image-to-3D
+          </button>
+          <button
+            onClick={toggleMultiviewMode}
+            style={{
+              background: multiviewMode ? 'rgba(6,182,212,0.18)' : '#12151d',
+              border: multiviewMode ? '1px solid rgba(6,182,212,0.45)' : '1px solid #1e2330',
+              borderRadius: 6,
+              padding: '4px 9px',
+              fontSize: 10,
+              fontWeight: 700,
+              color: multiviewMode ? '#67e8f9' : '#555b6e',
+              cursor: 'pointer',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase'
+            }}
+          >
+            🔲 Multi-view
+          </button>
+        </div>
+
+        {imageMode && !multiviewMode && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
             {part.imagePath ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
                 <span style={{ fontSize: 11, color: '#4ade80', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -582,7 +642,38 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
                 Attach Image…
               </button>
             )}
-          </>
+          </div>
+        )}
+
+        {multiviewMode && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginTop: 7 }}>
+            {MULTIVIEW_SLOTS.map((label, i) => {
+              const filePath = part.multiviewImages?.[i] || null
+              return (
+                <div key={label} style={{ background: '#0d0f14', border: '1px solid #1e2330', borderRadius: 6, padding: '5px 8px', display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                  <span style={{ fontSize: 10, color: '#555b6e', flexShrink: 0 }}>{label}</span>
+                  {filePath ? (
+                    <>
+                      <span style={{ fontSize: 10, color: '#4ade80', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {filePath.split(/[\\/]/).pop()}
+                      </span>
+                      <button
+                        onClick={() => clearMultiviewSlot(i)}
+                        style={{ background: 'none', border: 'none', color: '#7c8499', cursor: 'pointer', fontSize: 10, padding: '0 2px', flexShrink: 0 }}
+                      >✕</button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => pickMultiviewImage(i)}
+                      style={{ background: 'none', border: 'none', color: '#7c8499', cursor: 'pointer', fontSize: 10, padding: 0, textDecoration: 'underline' }}
+                    >
+                      + Add
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
 
@@ -644,7 +735,46 @@ function PartCard({ part, index, onRemove, onDuplicate, onGenerate, onPartChange
         >
           {busy ? <><SmallSpinIcon />Generating…</> : part.status === 'done' ? '↺ Regenerate' : '⚡ Generate Part'}
         </button>
+        {part.status === 'done' && part.outputPath && (
+          <button
+            onClick={onOptimize}
+            disabled={part.optimizeState === 'optimizing'}
+            title="Simplify mesh geometry to reduce polygon count and file size"
+            style={{
+              padding: '9px 11px',
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 700,
+              background: part.optimizeState === 'done' ? 'rgba(74,222,128,0.1)'
+                : part.optimizeState === 'error' ? 'rgba(248,113,113,0.08)'
+                : part.optimizeState === 'optimizing' ? 'rgba(245,158,11,0.08)'
+                : '#12151d',
+              color: part.optimizeState === 'done' ? '#4ade80'
+                : part.optimizeState === 'error' ? '#fca5a5'
+                : part.optimizeState === 'optimizing' ? '#f59e0b'
+                : '#7c8499',
+              border: part.optimizeState === 'done' ? '1px solid rgba(74,222,128,0.2)'
+                : part.optimizeState === 'error' ? '1px solid rgba(248,113,113,0.2)'
+                : part.optimizeState === 'optimizing' ? '1px solid rgba(245,158,11,0.2)'
+                : '1px solid #1e2330',
+              cursor: part.optimizeState === 'optimizing' ? 'wait' : 'pointer',
+              whiteSpace: 'nowrap',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
+            }}
+          >
+            {part.optimizeState === 'optimizing' ? <><SmallSpinIcon />Optimizing…</>
+              : part.optimizeState === 'done' ? `✓ -${part.optimizeSaved ?? 0}%`
+              : '✦ Optimize'}
+          </button>
+        )}
       </div>
+      {part.optimizeState === 'error' && part.optimizeError && (
+        <div style={{ marginTop: 5, fontSize: 10, color: '#fca5a5', lineHeight: 1.5 }}>
+          ⚠ {part.optimizeError}
+        </div>
+      )}
       <div style={{ marginTop: 6, fontSize: 10, color: '#3e4455' }}>
         Ctrl+Enter generates the current part
       </div>

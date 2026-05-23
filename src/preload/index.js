@@ -53,6 +53,7 @@ const api = {
   listGeneratedModels: () => ipcRenderer.invoke('modeling:listGeneratedModels'),
   saveGeneratedModel: (opts) => ipcRenderer.invoke('modeling:saveGeneratedModel', opts),
   readFileAsDataURL: (opts) => ipcRenderer.invoke('fs:readFileAsDataURL', opts),
+  optimizeMesh: (opts) => ipcRenderer.invoke('mesh:optimize', opts),
   onModelingProgress: (cb) => {
     const handler = (_, data) => cb(data)
     ipcRenderer.on('modeling:progress', handler)

@@ -13,8 +13,16 @@ const STYLES = [
 ]
 
 const VERSIONS = [
-  { id: 'v2.5-20250123', label: 'v2.5 (Best Quality)' },
+  { id: 'v3.0-20250421', label: 'v3.0 (Latest)' },
+  { id: 'v2.5-20250123', label: 'v2.5 (Quality)' },
   { id: 'v2.0-20240919', label: 'v2.0 (Fast)' }
+]
+
+const DOWNLOAD_FORMATS = [
+  { id: 'glb', label: 'GLB' },
+  { id: 'fbx', label: 'FBX' },
+  { id: 'obj', label: 'OBJ' },
+  { id: 'stl', label: 'STL' }
 ]
 
 const DEFAULT_TRIPO_WEB_BASE_URL = 'https://www.tripo3d.ai/'
@@ -57,11 +65,12 @@ export default function TripoPanel({ options, onChange }) {
       webBaseUrl: webBaseUrl.trim() || DEFAULT_TRIPO_WEB_BASE_URL,
       webGenerateUrl: webGenerateUrl.trim() || webBaseUrl.trim() || DEFAULT_TRIPO_WEB_BASE_URL,
       showBrowserAutomation,
-      modelVersion: options.modelVersion || 'v2.5-20250123',
+      modelVersion: options.modelVersion || 'v3.0-20250421',
       texture: options.texture !== false,
       pbr: options.pbr !== false,
       smartLowPoly: !!options.smartLowPoly,
-      style: options.style || null
+      style: options.style || null,
+      downloadFormat: options.downloadFormat || 'glb'
     })
   }, [
     onChange,
@@ -70,6 +79,7 @@ export default function TripoPanel({ options, onChange }) {
     options.smartLowPoly,
     options.style,
     options.texture,
+    options.downloadFormat,
     showBrowserAutomation,
     webBaseUrl,
     webGenerateUrl
@@ -369,7 +379,7 @@ export default function TripoPanel({ options, onChange }) {
           Model Version
         </label>
         <select
-          value={options.modelVersion || 'v2.5-20250123'}
+          value={options.modelVersion || 'v3.0-20250421'}
           onChange={(e) => onChange({ ...options, modelVersion: e.target.value, authMode: 'web' })}
           style={sel}
         >
@@ -406,6 +416,36 @@ export default function TripoPanel({ options, onChange }) {
             </option>
           ))}
         </select>
+      </div>
+
+      <div>
+        <label
+          style={{
+            display: 'block',
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#555b6e',
+            marginBottom: 6,
+            textTransform: 'uppercase',
+            letterSpacing: '0.07em'
+          }}
+        >
+          Download Format
+        </label>
+        <select
+          value={options.downloadFormat || 'glb'}
+          onChange={(e) => onChange({ ...options, downloadFormat: e.target.value, authMode: 'web' })}
+          style={sel}
+        >
+          {DOWNLOAD_FORMATS.map((fmt) => (
+            <option key={fmt.id} value={fmt.id}>
+              {fmt.label}
+            </option>
+          ))}
+        </select>
+        <p style={{ fontSize: 10, color: '#3e4455', marginTop: 5 }}>
+          GLB recommended for Roblox and Playground preview
+        </p>
       </div>
 
       <div>

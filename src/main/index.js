@@ -764,9 +764,9 @@ function captureTripoWebDownload(win, outDir, timeoutMs = 300000) {
   })
 }
 
-async function triggerTripoWebDownload(win) {
+async function triggerTripoWebDownload(win, preferredFormat = 'glb') {
   return win.webContents.executeJavaScript(`
-    (() => {
+    ((fmt) => {
       const visible = (el) => {
         if (!el) return false
         const style = window.getComputedStyle(el)
@@ -774,6 +774,15 @@ async function triggerTripoWebDownload(win) {
         return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
       }
       const textOf = (el) => (el?.innerText || el?.textContent || '').trim()
+
+      // If a non-GLB format is requested, try to find and click a format selector first
+      if (fmt !== 'glb') {
+        const fmtRe = new RegExp('^' + fmt + '$', 'i')
+        const fmtBtn = Array.from(document.querySelectorAll('button,a,[role="button"],li,[role="option"]'))
+          .filter(visible)
+          .find(el => fmtRe.test(textOf(el).split(/[\\s/|,]/)[0]))
+        if (fmtBtn) { fmtBtn.click(); return { action: 'format', format: textOf(fmtBtn) } }
+      }
 
       const directLink = Array.from(document.querySelectorAll('a[href]'))
         .filter(visible)
@@ -791,7 +800,7 @@ async function triggerTripoWebDownload(win) {
       }
 
       return { action: 'none' }
-    })()
+    })(${JSON.stringify(preferredFormat)})
   `)
 }
 
@@ -868,6 +877,85 @@ async function uploadImageToTripoWebPage(win, imagePath) {
     }
   }
 }
+
+// ── Tripo multiview: upload 2–4 angle images via CDP ─────────────────────
+
+async function uploadMultiviewImagesToTripoWebPage(win, imagePaths) {
+  const validPaths = (imagePaths || []).filter(Boolean)
+  if (!validPaths.length) return { success: false, error: 'No images provided for multiview.' }
+
+  // Try to click the multiview tab on the Tripo page
+  await win.webContents.executeJavaScript(`
+    (() => {
+      const visible = (el) => {
+        if (!el) return false
+        const s = window.getComputedStyle(el)
+        const r = el.getBoundingClientRect()
+        return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 4 && r.height > 4
+      }
+      const el = Array.from(document.querySelectorAll('button,[role="tab"],[role="button"],li'))
+        .filter(visible)
+        .find(e => /multi.?view|multiple images?|多视角|multi view/i.test((e.innerText || e.textContent || e.className || '')))
+      if (el) { el.click(); return 'clicked' }
+      return 'none'
+    })()
+  `)
+  await wait(1500)
+
+  // Collect all image file inputs on the page
+  await win.webContents.executeJavaScript(`
+    (() => {
+      const inputs = Array.from(document.querySelectorAll('input[type="file"]'))
+        .filter(el => !el.accept || el.accept.includes('image') || el.accept === '*' || el.accept === 'image/*')
+      window.__tripoMultiviewInputs = inputs
+    })()
+  `)
+
+  let dbg = null
+  try {
+    dbg = win.webContents.debugger
+    if (!dbg.isAttached()) dbg.attach('1.3')
+
+    const inputCountRes = await dbg.sendCommand('Runtime.evaluate', {
+      expression: '(window.__tripoMultiviewInputs || []).length',
+      returnByValue: true
+    })
+    const inputCount = inputCountRes.result?.value || 0
+    const slotsAvailable = Math.max(inputCount, 1)
+    const uploads = Math.min(validPaths.length, slotsAvailable)
+
+    for (let i = 0; i < uploads; i++) {
+      const imagePath = validPaths[i]
+      const evalRes = await dbg.sendCommand('Runtime.evaluate', {
+        expression: `window.__tripoMultiviewInputs[${i}]`,
+        returnByValue: false
+      })
+      if (!evalRes.result?.objectId) continue
+
+      const nodeRes = await dbg.sendCommand('DOM.requestNode', { objectId: evalRes.result.objectId })
+      await dbg.sendCommand('DOM.setFileInputFiles', { files: [imagePath], nodeId: nodeRes.nodeId })
+
+      await win.webContents.executeJavaScript(`
+        (() => {
+          const inp = window.__tripoMultiviewInputs[${i}]
+          if (!inp) return
+          inp.dispatchEvent(new Event('change', { bubbles: true }))
+          inp.dispatchEvent(new Event('input', { bubbles: true }))
+        })()
+      `)
+      await wait(400)
+    }
+
+    return { success: true, uploaded: uploads }
+  } catch (err) {
+    return { success: false, error: `Multiview image injection failed: ${err.message}` }
+  } finally {
+    if (dbg?.isAttached()) {
+      try { dbg.detach() } catch { /* ignore */ }
+    }
+  }
+}
+
 
 ipcMain.handle('dialog:openVideo', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -1881,18 +1969,21 @@ ipcMain.handle(
     {
       prompt = '',
       imagePath = '',
+      multiviewImages = [],
       baseUrl,
       generateUrl,
       showBrowser = true,
-      keepWindowOpen = false
+      keepWindowOpen = false,
+      downloadFormat = 'glb'
     } = {}
   ) => {
     let win = null
+    const isMultiview = Array.isArray(multiviewImages) && multiviewImages.some(Boolean)
     const isImageMode = Boolean(imagePath && imagePath.trim())
 
     try {
-      if (!prompt.trim() && !isImageMode) {
-        return { success: false, error: 'A text prompt or a reference image is required.' }
+      if (!prompt.trim() && !isImageMode && !isMultiview) {
+        return { success: false, error: 'A text prompt, a reference image, or multiview images are required.' }
       }
 
       const status = await inspectTripoWebSession(
@@ -1925,7 +2016,12 @@ ipcMain.handle(
       )
       if (!targetSurface.success) return { success: false, error: targetSurface.error }
 
-      if (isImageMode) {
+      if (isMultiview) {
+        event.sender.send('modeling:progress', { step: 'Uploading multiview images to Tripo…', pct: 20 })
+        const upload = await uploadMultiviewImagesToTripoWebPage(win, multiviewImages.filter(Boolean))
+        if (!upload.success) return { success: false, error: upload.error }
+        await wait(1500)
+      } else if (isImageMode) {
         event.sender.send('modeling:progress', { step: 'Uploading reference image to Tripo…', pct: 22 })
         const upload = await uploadImageToTripoWebPage(win, imagePath.trim())
         if (!upload.success) return { success: false, error: upload.error }
@@ -1933,12 +2029,12 @@ ipcMain.handle(
       }
 
       if (prompt.trim()) {
-        event.sender.send('modeling:progress', { step: 'Submitting prompt in browser session…', pct: isImageMode ? 30 : 24 })
+        event.sender.send('modeling:progress', { step: 'Submitting prompt in browser session…', pct: isImageMode || isMultiview ? 30 : 24 })
         const submit = await submitTripoWebPrompt(win, prompt.trim())
         if (!submit.success) return { success: false, error: submit.error }
       } else {
-        // Image-only: click generate/create button without typing a prompt
-        event.sender.send('modeling:progress', { step: 'Triggering image-to-3D generation…', pct: 30 })
+        // Image/multiview-only: click generate/create button without typing a prompt
+        event.sender.send('modeling:progress', { step: isMultiview ? 'Triggering multiview-to-3D generation…' : 'Triggering image-to-3D generation…', pct: 30 })
         const triggered = await win.webContents.executeJavaScript(`
           (() => {
             const visible = (el) => {
@@ -1963,12 +2059,12 @@ ipcMain.handle(
         await wait(4000)
         const pct = Math.min(92, 30 + attempt)
         event.sender.send('modeling:progress', { step: 'Waiting for Tripo result…', pct })
-        const action = await triggerTripoWebDownload(win)
+        const action = await triggerTripoWebDownload(win, downloadFormat)
         if (action.action === 'downloadURL' && action.url) {
           win.webContents.downloadURL(action.url)
           break
         }
-        if (action.action === 'clicked') {
+        if (action.action === 'clicked' || action.action === 'format') {
           // Allow the page to open export menus or trigger a native download event.
           await wait(1500)
         }
@@ -1976,7 +2072,8 @@ ipcMain.handle(
 
       const outputPath = await downloadPromise
       event.sender.send('modeling:progress', { step: 'Model ready!', pct: 100 })
-      return { success: true, outputPath, provider: isImageMode ? 'tripo-web-image' : 'tripo-web' }
+      const provider = isMultiview ? 'tripo-web-multiview' : isImageMode ? 'tripo-web-image' : 'tripo-web'
+      return { success: true, outputPath, provider }
     } catch (err) {
       return {
         success: false,
@@ -1989,6 +2086,48 @@ ipcMain.handle(
     }
   }
 )
+
+// ── Mesh optimization (polygon simplification + dedup/prune) ─────────────
+
+ipcMain.handle('mesh:optimize', async (_, { inputPath, ratio = 0.5 } = {}) => {
+  if (!inputPath || !existsSync(inputPath)) {
+    return { success: false, error: 'Input file not found.' }
+  }
+
+  try {
+    const { NodeIO } = await import('@gltf-transform/core')
+    const { simplify, dedup, prune, reorder, quantize } = await import('@gltf-transform/functions')
+    const { MeshoptSimplifier, MeshoptEncoder } = await import('meshoptimizer')
+
+    await MeshoptSimplifier.ready
+    await MeshoptEncoder.ready
+
+    const io = new NodeIO()
+    const document = await io.read(inputPath)
+
+    const transforms = [
+      dedup(),
+      prune(),
+      ...(ratio < 1.0 ? [simplify({ simplifier: MeshoptSimplifier, ratio: Math.max(0.01, Math.min(1.0, ratio)), error: 0.001 })] : []),
+      reorder({ encoder: MeshoptEncoder }),
+      quantize()
+    ]
+
+    await document.transform(...transforms)
+
+    const ext = inputPath.match(/\.[^.]+$/)?.[0] || '.glb'
+    const outputPath = inputPath.replace(/(\.[^.]+)$/, `_optimized${ext}`)
+    await io.write(outputPath, document)
+
+    const inputSize = statSync(inputPath).size
+    const outputSize = statSync(outputPath).size
+    const saved = Math.max(0, Math.round((1 - outputSize / inputSize) * 100))
+
+    return { success: true, outputPath, inputSize, outputSize, saved }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
 
 // ── App lifecycle ─────────────────────────────────────────────────────────
 

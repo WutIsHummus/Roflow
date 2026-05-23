@@ -36,11 +36,12 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
     webBaseUrl: 'https://www.tripo3d.ai/',
     webGenerateUrl: 'https://www.tripo3d.ai/',
     showBrowserAutomation: true,
-    modelVersion: 'v2.5-20250123',
+    modelVersion: 'v3.0-20250421',
     texture: true,
     pbr: true,
     smartLowPoly: false,
-    style: null
+    style: null,
+    downloadFormat: 'glb'
   })
   const [globalProgress, setGlobalProgress] = useState(null)
   const [workspaceAssets, setWorkspaceAssets] = useState([])
@@ -251,10 +252,12 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
         const res = await window.api.tripoWebGenerate({
           prompt: part.prompt.trim(),
           imagePath: part.imagePath || '',
+          multiviewImages: part.multiviewImages || [],
           baseUrl: tripoOpts.webBaseUrl,
           generateUrl: tripoOpts.webGenerateUrl,
           showBrowser: tripoOpts.showBrowserAutomation,
-          keepWindowOpen: tripoOpts.showBrowserAutomation
+          keepWindowOpen: tripoOpts.showBrowserAutomation,
+          downloadFormat: tripoOpts.downloadFormat || 'glb'
         })
 
         setGlobalProgress(null)
@@ -315,6 +318,49 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
       }
     },
     [loadWorkspaceAssets, tab, tripoOpts]
+  )
+
+  const optimizePart = useCallback(
+    async (id) => {
+      const setter = tab === 'character' ? setCharParts : setEnvParts
+      setter((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, optimizeState: 'optimizing', optimizeError: null } : p))
+      )
+      const part = (() => {
+        let found = null
+        setter((prev) => { found = prev.find((p) => p.id === id); return prev })
+        return found
+      })()
+      if (!part?.outputPath) {
+        setter((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, optimizeState: 'error', optimizeError: 'No output file to optimize.' } : p))
+        )
+        return
+      }
+      const res = await window.api.optimizeMesh({ inputPath: part.outputPath })
+      if (!res.success) {
+        setter((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, optimizeState: 'error', optimizeError: res.error } : p))
+        )
+        return
+      }
+      const dataUrlRes = await window.api.readFileAsDataURL({ filePath: res.outputPath })
+      setter((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                outputPath: res.outputPath,
+                dataUrl: dataUrlRes.success ? dataUrlRes.dataUrl : p.dataUrl,
+                optimizeState: 'done',
+                optimizeSaved: res.saved,
+                optimizeError: null
+              }
+            : p
+        )
+      )
+    },
+    [tab]
   )
 
   const exportScene = useCallback(async () => {
@@ -688,6 +734,7 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
             onGenerate={generatePart}
             onPartChange={updatePart}
             onImportMesh={importMeshAsPart}
+            onOptimize={optimizePart}
             showAttachPoint={tab === 'character'}
             tripoAssets={historyBrowserAssets}
             onAddTripoAsset={addGeneratedAssetToCurrentTab}
