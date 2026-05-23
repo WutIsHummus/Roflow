@@ -1,5 +1,6 @@
 /* eslint-disable react/prop-types, react-hooks/set-state-in-effect */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Shirt, Trash2, Upload } from 'lucide-react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js'
@@ -15,126 +16,82 @@ import {
   normName
 } from '../Modeling/r15Utils'
 
-const PANEL = {
-  page: { display: 'flex', height: '100%', overflow: 'hidden', background: '#0f1116' },
-  side: {
-    width: 320,
-    flexShrink: 0,
-    borderRight: '1px solid #1e2330',
-    padding: '20px 18px',
-    overflowY: 'auto'
+const categoryStyles = {
+  animation: {
+    border: 'border-violet-500/20 hover:border-violet-500/40',
+    bg: 'bg-violet-950/[0.03]',
+    activeBg: 'bg-violet-950/[0.08]',
+    shadow: 'shadow-[0_0_14px_rgba(167,139,250,0.12),inset_0_0_12px_rgba(167,139,250,0.05)]',
+    badge: 'border-violet-500/20 text-violet-400 bg-violet-950/40 shadow-[0_0_8px_rgba(167,139,250,0.15)]',
+    btn: 'hover:border-violet-500/30 hover:bg-violet-500/10 text-violet-300 bg-violet-950/20'
   },
-  title: { fontSize: 18, fontWeight: 700, color: '#eef0f6', margin: 0 },
-  desc: { fontSize: 13, color: '#555b6e', marginTop: 4, lineHeight: 1.6 },
-  card: {
-    background: '#141821',
-    border: '1px solid #202533',
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 14
+  clothing: {
+    border: 'border-sky-500/20 hover:border-sky-500/40',
+    bg: 'bg-sky-950/[0.03]',
+    activeBg: 'bg-sky-950/[0.08]',
+    shadow: 'shadow-[0_0_14px_rgba(56,189,248,0.12),inset_0_0_12px_rgba(56,189,248,0.05)]',
+    badge: 'border-sky-500/20 text-sky-400 bg-sky-950/40 shadow-[0_0_8px_rgba(56,189,248,0.15)]',
+    btn: 'hover:border-sky-500/30 hover:bg-sky-500/10 text-sky-300 bg-sky-950/20'
   },
-  cardTitle: {
-    fontSize: 11,
-    color: '#7c8499',
-    textTransform: 'uppercase',
-    letterSpacing: '0.08em',
-    marginBottom: 8
+  modeling: {
+    border: 'border-emerald-500/20 hover:border-emerald-500/40',
+    bg: 'bg-emerald-950/[0.03]',
+    activeBg: 'bg-emerald-950/[0.08]',
+    shadow: 'shadow-[0_0_14px_rgba(74,222,128,0.12),inset_0_0_12px_rgba(74,222,128,0.05)]',
+    badge: 'border-emerald-500/20 text-emerald-400 bg-emerald-950/40 shadow-[0_0_8px_rgba(74,222,128,0.15)]',
+    btn: 'hover:border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-300 bg-emerald-950/20'
   },
-  cardValue: { fontSize: 14, fontWeight: 700, color: '#eef0f6', marginBottom: 6 },
-  cardText: { fontSize: 12, color: '#8c93a7', lineHeight: 1.6 },
-  buttonRow: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 16 },
-  primaryBtn: {
-    border: 'none',
-    borderRadius: 10,
-    padding: '10px 12px',
-    fontSize: 12,
-    fontWeight: 700,
-    color: '#fff',
-    background: 'linear-gradient(135deg,#7c3aed,#a78bfa)',
-    cursor: 'pointer'
+  'modeling-environment': {
+    border: 'border-amber-500/20 hover:border-amber-500/40',
+    bg: 'bg-amber-950/[0.03]',
+    activeBg: 'bg-amber-950/[0.08]',
+    shadow: 'shadow-[0_0_14px_rgba(245,158,11,0.12),inset_0_0_12px_rgba(245,158,11,0.05)]',
+    badge: 'border-amber-500/20 text-amber-400 bg-amber-950/40 shadow-[0_0_8px_rgba(245,158,11,0.15)]',
+    btn: 'hover:border-amber-500/30 hover:bg-amber-500/10 text-amber-300 bg-amber-950/20'
   },
-  secondaryBtn: {
-    border: '1px solid #2a3040',
-    borderRadius: 10,
-    padding: '10px 12px',
-    fontSize: 12,
-    fontWeight: 700,
-    color: '#aab0c0',
-    background: '#171b24',
-    cursor: 'pointer'
-  },
-  hint: {
-    marginTop: 16,
-    padding: '12px 14px',
-    borderRadius: 10,
-    background: 'rgba(124,58,237,0.08)',
-    border: '1px solid rgba(124,58,237,0.18)',
-    fontSize: 12,
-    color: '#9aa0b0',
-    lineHeight: 1.7
-  },
-  nodeStack: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10,
-    marginTop: 14
-  },
-  nodeWrap: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    gap: 10
-  },
-  nodeConnector: {
-    width: 2,
-    height: 18,
-    background: 'linear-gradient(180deg,rgba(124,58,237,0.4),rgba(167,139,250,0.08))',
-    borderRadius: 999,
-    alignSelf: 'center'
-  },
-  nodeShell: {
-    background: '#141821',
-    border: '1px solid #202533',
-    borderRadius: 14,
-    padding: 14
-  },
-  nodeHead: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 8
-  },
-  nodeTitle: {
-    fontSize: 13,
-    fontWeight: 700,
-    color: '#eef0f6'
-  },
-  nodeMeta: {
-    fontSize: 11,
-    color: '#8c93a7',
-    lineHeight: 1.6
-  },
-  nodeAction: {
-    border: '1px solid #2a3040',
-    borderRadius: 9,
-    padding: '8px 10px',
-    fontSize: 11,
-    fontWeight: 700,
-    color: '#c4cad8',
-    background: '#171b24',
-    cursor: 'pointer',
-    marginTop: 10,
-    width: '100%'
+  ui: {
+    border: 'border-rose-500/20 hover:border-rose-500/40',
+    bg: 'bg-rose-950/[0.03]',
+    activeBg: 'bg-rose-950/[0.08]',
+    shadow: 'shadow-[0_0_14px_rgba(251,113,133,0.12),inset_0_0_12px_rgba(251,113,133,0.05)]',
+    badge: 'border-rose-500/20 text-rose-400 bg-rose-950/40 shadow-[0_0_8px_rgba(251,113,133,0.15)]',
+    btn: 'hover:border-rose-500/30 hover:bg-rose-500/10 text-rose-300 bg-rose-950/20'
   }
 }
 
 const ENV_SPACING = 2.8
 
-export default function PlaygroundModule({ workflowState, onChangeModule }) {
+const PREVIEW_TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'clothes', label: 'Clothes' }
+]
+
+const DEFAULT_CLOTHING_WORKFLOW = {
+  provider: 'replicate',
+  assetType: 'shirt',
+  designPrompt: '',
+  colorPalette: '',
+  materialNotes: '',
+  styleNotes: '',
+  templateImagePath: null,
+  templateDataUrl: null,
+  resultPath: null,
+  resultDataUrl: null,
+  seed: '',
+  lastPrompt: ''
+}
+
+export default function PlaygroundModule({ workflowState, setWorkflowState, onChangeModule }) {
+  const [previewTab, setPreviewTab] = useState('overview')
+  const [clothingBusy, setClothingBusy] = useState('')
+  const [clothingNotice, setClothingNotice] = useState('')
+
   const animationResult = workflowState?.animationResult || null
   const clothingWorkflow = workflowState?.clothingWorkflow || null
-  const activeClothing = clothingWorkflow?.resultDataUrl ? clothingWorkflow : null
+  const hasClothingTexture = Boolean(
+    clothingWorkflow?.resultDataUrl || clothingWorkflow?.resultPath
+  )
+  const activeClothing = hasClothingTexture ? clothingWorkflow : null
   const accessories = useMemo(
     () => (workflowState?.charParts || []).filter((part) => part.status === 'done' && part.dataUrl),
     [workflowState]
@@ -180,12 +137,14 @@ export default function PlaygroundModule({ workflowState, onChangeModule }) {
     {
       id: 'clothing',
       title: 'Clothing Node',
-      ready: Boolean(activeClothing?.resultDataUrl),
+      ready: Boolean(activeClothing),
       accent: '#38bdf8',
       actionLabel: 'Open Clothing',
       summary: activeClothing?.resultDataUrl
         ? `Classic ${activeClothing.assetType || 'shirt'} texture is ready for the avatar overlay.`
-        : 'No classic clothing texture connected yet.'
+        : activeClothing?.resultPath
+          ? 'Classic clothing file connected — loading texture preview…'
+          : 'No classic clothing texture connected yet.'
     },
     {
       id: 'modeling',
@@ -224,125 +183,464 @@ export default function PlaygroundModule({ workflowState, onChangeModule }) {
   ]
   const connectedNodeCount = workflowNodes.filter((node) => node.ready).length
 
-  return (
-    <div style={PANEL.page}>
-      <div style={PANEL.side}>
-        <h1 style={PANEL.title}>Workflow Playground</h1>
-        <p style={PANEL.desc}>
-          Streamline the flow as one connected graph: motion, classic clothing, accessories,
-          environment, and UI all feed the same Roblox preview stage.
-        </p>
+  const updateClothingWorkflow = useCallback(
+    (changes) => {
+      if (!setWorkflowState) return
+      setWorkflowState((prev) => ({
+        ...prev,
+        clothingWorkflow: {
+          ...DEFAULT_CLOTHING_WORKFLOW,
+          ...(prev.clothingWorkflow || {}),
+          ...changes
+        }
+      }))
+    },
+    [setWorkflowState]
+  )
 
-        <div style={PANEL.card}>
-          <div style={PANEL.cardTitle}>Playground graph</div>
-          <div style={PANEL.cardValue}>
+  useEffect(() => {
+    const workflow = clothingWorkflow
+    if (!workflow?.resultPath || workflow.resultDataUrl) return undefined
+    let cancelled = false
+
+    async function hydrateClothingTexture() {
+      const result = await window.api.readFileAsDataURL({ filePath: workflow.resultPath })
+      if (cancelled || !result.success) return
+      updateClothingWorkflow({ resultDataUrl: result.dataUrl })
+    }
+
+    hydrateClothingTexture().catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [clothingWorkflow?.resultPath, clothingWorkflow?.resultDataUrl, updateClothingWorkflow])
+
+  const importClothingTexture = useCallback(async () => {
+    setClothingBusy('import')
+    const filePath = await window.api.openImage()
+    if (!filePath) {
+      setClothingBusy('')
+      return
+    }
+    const result = await window.api.readFileAsDataURL({ filePath })
+    setClothingBusy('')
+    if (!result.success) {
+      setClothingNotice(result.error || 'Could not load clothing image.')
+      return
+    }
+    updateClothingWorkflow({
+      resultPath: filePath,
+      resultDataUrl: result.dataUrl,
+      lastPrompt: ''
+    })
+    setPreviewTab('clothes')
+    setClothingNotice('Clothing texture imported.')
+  }, [updateClothingWorkflow])
+
+  const clearClothingTexture = useCallback(() => {
+    updateClothingWorkflow({
+      resultPath: null,
+      resultDataUrl: null,
+      lastPrompt: ''
+    })
+    setClothingNotice('Clothing texture cleared.')
+  }, [updateClothingWorkflow])
+
+  useEffect(() => {
+    if (!clothingNotice) return undefined
+    const timeout = window.setTimeout(() => setClothingNotice(''), 2400)
+    return () => window.clearTimeout(timeout)
+  }, [clothingNotice])
+
+  return (
+    <div className="flex h-full w-full overflow-hidden bg-radial from-[#121625] to-[#07090e] text-slate-100">
+      <div className="w-[340px] shrink-0 border-r border-white/5 bg-[#0a0c14]/40 backdrop-blur-xl p-5 overflow-y-auto custom-scrollbar flex flex-col gap-4">
+        <div>
+          <h1 className="text-xl font-bold bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
+            Workflow Playground
+          </h1>
+          <p className="text-xs text-slate-400 leading-relaxed mt-1.5">
+            Streamline the flow as one connected graph: motion, classic clothing, accessories,
+            environment, and UI all feed the same Roblox preview stage.
+          </p>
+        </div>
+
+        <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 shadow-xl backdrop-blur-md">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+            Playground graph
+          </div>
+          <div className="text-base font-bold text-white mb-1.5">
             {connectedNodeCount}/{workflowNodes.length} node{workflowNodes.length === 1 ? '' : 's'} connected
           </div>
-          <div style={PANEL.cardText}>
+          <div className="text-xs text-slate-400 leading-relaxed">
             This is a lightweight node-based review board rather than a full graph editor, so you
             can jump between modules quickly and see what is already feeding the live viewport.
           </div>
         </div>
 
-        <div style={PANEL.nodeStack}>
-          {workflowNodes.map((node, index) => (
-            <div key={node.id} style={PANEL.nodeWrap}>
-              {index > 0 && <div style={PANEL.nodeConnector} />}
-              <div
-                style={{
-                  ...PANEL.nodeShell,
-                  border: node.ready ? `1px solid ${node.accent}55` : '1px solid #202533',
-                  boxShadow: node.ready ? `0 0 0 1px ${node.accent}15 inset` : 'none'
-                }}
-              >
-                <div style={PANEL.nodeHead}>
-                  <div style={PANEL.nodeTitle}>{node.title}</div>
-                  <span style={badgeStyle(node.ready ? node.accent : '#6b7280')}>
-                    {node.ready ? 'Connected' : 'Waiting'}
-                  </span>
-                </div>
-                <div style={PANEL.nodeMeta}>{node.summary}</div>
-                <button
-                  style={PANEL.nodeAction}
-                  onClick={() => onChangeModule?.(node.actionModule || node.id)}
-                >
-                  {node.actionLabel}
-                </button>
+        <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 shadow-xl backdrop-blur-md">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                Connected clothing
+              </div>
+              <div className="text-base font-bold text-white mb-1.5">
+                {activeClothing?.resultDataUrl
+                  ? `Classic ${activeClothing.assetType || 'shirt'} ready`
+                  : activeClothing?.resultPath
+                    ? 'Loading clothing texture…'
+                    : 'No clothing texture yet'}
               </div>
             </div>
-          ))}
-          <div style={PANEL.nodeConnector} />
-          <div style={{ ...PANEL.nodeShell, border: '1px solid rgba(124,58,237,0.45)' }}>
-            <div style={PANEL.nodeHead}>
-              <div style={PANEL.nodeTitle}>Playground Output</div>
-              <span style={badgeStyle('#c4b5fd')}>Live</span>
+            <button
+              className="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-sky-500/25 bg-sky-950/30 text-sky-300 hover:bg-sky-900/40 hover:border-sky-400/40 transition-all duration-200 cursor-pointer flex items-center gap-1 shrink-0"
+              onClick={() => setPreviewTab('clothes')}
+            >
+              <Shirt size={11} /> Clothes tab
+            </button>
+          </div>
+          <div className="text-xs text-slate-400 leading-relaxed">
+            {activeClothing?.resultDataUrl
+              ? 'The texture is projected onto the rig as an overlay so you can judge seams and silhouette while the character animates.'
+              : 'Import a finished PNG here or generate one in Clothing Studio to preview it on the rig.'}
+          </div>
+
+          <button
+            className="w-full mt-3 px-4 py-3 text-sm font-bold rounded-xl border border-sky-500/30 bg-sky-950/40 text-sky-200 hover:bg-sky-900/50 hover:border-sky-400/50 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 shadow-[0_0_16px_rgba(56,189,248,0.08)]"
+            onClick={importClothingTexture}
+            disabled={clothingBusy === 'import'}
+          >
+            <Upload size={14} />
+            {clothingBusy === 'import' ? 'Importing…' : 'Import PNG'}
+          </button>
+
+          <div className="flex gap-2 mt-3 flex-wrap">
+            {activeClothing?.resultDataUrl && (
+              <button
+                className="px-3 py-2 text-xs font-semibold rounded-xl border border-white/5 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05] hover:border-white/10 transition-all duration-200 cursor-pointer flex items-center gap-1.5"
+                onClick={clearClothingTexture}
+              >
+                <Trash2 size={12} /> Clear
+              </button>
+            )}
+          </div>
+
+          <div className="flex gap-2 mt-3">
+            {['shirt', 'pants'].map((type) => {
+              const active = (clothingWorkflow?.assetType || 'shirt') === type
+              return (
+                <button
+                  key={type}
+                  className={`flex-1 py-2 text-[11px] font-bold rounded-xl border transition-all duration-200 cursor-pointer ${
+                    active
+                      ? 'bg-sky-950/40 border-sky-500/30 text-sky-300'
+                      : 'border-white/5 bg-white/[0.02] text-slate-400 hover:text-slate-200 hover:border-white/10'
+                  }`}
+                  onClick={() => updateClothingWorkflow({ assetType: type })}
+                >
+                  {type === 'shirt' ? 'Classic Shirt' : 'Classic Pants'}
+                </button>
+              )
+            })}
+          </div>
+
+          {clothingNotice && (
+            <div className="mt-3 px-3 py-2 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-300 text-[11px] font-medium">
+              {clothingNotice}
             </div>
-            <div style={PANEL.nodeMeta}>
+          )}
+
+          {activeClothing?.resultDataUrl && (
+            <img
+              src={activeClothing.resultDataUrl}
+              alt="Connected classic clothing texture"
+              className="w-full mt-3 rounded-xl border border-white/5 shadow-lg shadow-black/25 hover:border-white/10 transition-all duration-300"
+            />
+          )}
+        </div>
+
+        <div className="flex flex-col gap-3 mt-1">
+          {workflowNodes.map((node, index) => {
+            const nodeStyle = categoryStyles[node.id] || {
+              border: 'border-white/5',
+              bg: 'bg-white/[0.01]',
+              activeBg: 'bg-white/[0.02]',
+              shadow: '',
+              badge: 'border-white/5 text-slate-400 bg-slate-950/40',
+              btn: 'hover:border-white/10 hover:bg-white/[0.04]'
+            }
+            return (
+              <div key={node.id} className="flex flex-col items-stretch">
+                {index > 0 && (
+                  <div className="w-0.5 h-6 bg-gradient-to-b from-violet-500/30 to-transparent self-center rounded-full my-1" />
+                )}
+                <div
+                  className={`border rounded-2xl p-4 transition-all duration-300 backdrop-blur-md ${
+                    node.ready
+                      ? `${nodeStyle.border} ${nodeStyle.activeBg} ${nodeStyle.shadow}`
+                      : 'border-white/5 bg-white/[0.01] hover:bg-white/[0.02]'
+                  }`}
+                >
+                  <div className="flex justify-between items-center gap-3 mb-2">
+                    <div className="text-xs font-bold text-slate-100">{node.title}</div>
+                    <span
+                      className={`px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full border backdrop-blur-md ${
+                        node.ready
+                          ? nodeStyle.badge
+                          : 'border-slate-500/20 text-slate-400 bg-slate-950/40'
+                      }`}
+                    >
+                      {node.ready ? 'Connected' : 'Waiting'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-400 leading-relaxed">{node.summary}</div>
+                  <button
+                    className={`w-full mt-3 px-3 py-2 text-xs font-semibold rounded-xl border transition-all duration-200 cursor-pointer active:scale-[0.98] ${
+                      node.ready
+                        ? `${nodeStyle.btn}`
+                        : 'border-white/5 bg-white/[0.02] text-slate-300 hover:border-white/10 hover:bg-white/[0.05]'
+                    }`}
+                    onClick={() => onChangeModule?.(node.actionModule || node.id)}
+                  >
+                    {node.actionLabel}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+          
+          <div className="w-0.5 h-6 bg-gradient-to-b from-violet-500/30 to-transparent self-center rounded-full my-1" />
+          
+          <div className="border border-violet-500/30 bg-violet-950/[0.08] shadow-[0_0_16px_rgba(124,58,237,0.12),inset_0_0_12px_rgba(124,58,237,0.06)] rounded-2xl p-4 backdrop-blur-md">
+            <div className="flex justify-between items-center gap-3 mb-2">
+              <div className="text-xs font-bold text-slate-100">Playground Output</div>
+              <span className="px-2 py-0.5 text-[10px] font-semibold tracking-wide rounded-full border border-violet-500/30 text-violet-400 bg-violet-950/40 shadow-[0_0_8px_rgba(124,58,237,0.15)] backdrop-blur-md">
+                Live
+              </span>
+            </div>
+            <div className="text-xs text-slate-400 leading-relaxed">
               Combined preview of the animated R15 rig, classic clothing overlay, equipped
               accessories, scene parts, and workflow state.
             </div>
           </div>
         </div>
 
-        <div style={PANEL.card}>
-          <div style={PANEL.cardTitle}>Connected clothing</div>
-          <div style={PANEL.cardValue}>
-            {activeClothing?.resultDataUrl
-              ? `Classic ${activeClothing.assetType || 'shirt'} ready`
-              : 'No clothing texture yet'}
-          </div>
-          <div style={PANEL.cardText}>
-            {activeClothing?.resultDataUrl
-              ? 'The generated texture is projected onto the rig as an overlay so you can judge seams and silhouette while the character animates.'
-              : 'Generate a classic shirt or pants texture in Clothing Studio and it will appear on the rig here automatically.'}
-          </div>
-          {activeClothing?.resultDataUrl && (
-            <img
-              src={activeClothing.resultDataUrl}
-              alt="Connected classic clothing texture"
-              style={{
-                width: '100%',
-                marginTop: 12,
-                borderRadius: 10,
-                border: '1px solid #252a36'
-              }}
-            />
-          )}
-        </div>
-
-        <div style={PANEL.hint}>
-          <strong style={{ color: '#c4b5fd' }}>Current workflow:</strong>
-          <br />
-          1. Generate motion in Animation
-          <br />
-          2. Generate classic shirt or pants textures in Clothing
-          <br />
-          3. Generate accessories / scene parts in Modeling
-          <br />
-          4. Create UI frames in UI Studio
-          <br />
-          5. Return here to review the connected node flow in one viewport
+        <div className="p-4 rounded-2xl bg-violet-950/[0.04] border border-violet-500/10 text-xs text-slate-400 leading-relaxed flex flex-col gap-1.5">
+          <strong className="text-violet-300">Current workflow:</strong>
+          <div>1. Generate motion in Animation</div>
+          <div>2. Generate classic shirt/pants in Clothing</div>
+          <div>3. Generate accessories in Modeling</div>
+          <div>4. Create UI frames in UI Studio</div>
+          <div>5. Review the connected flow here</div>
         </div>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <WorkflowViewport
-          animationResult={animationResult}
-          clothingAsset={activeClothing}
-          accessories={accessories}
-          envParts={envParts}
-        />
+      <div className="flex-1 min-w-0 flex flex-col">
+        <div className="shrink-0 border-b border-white/5 bg-[#0a0c14]/60 backdrop-blur-xl px-4 py-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex gap-1.5 bg-white/[0.02] p-1 rounded-xl border border-white/5">
+              {PREVIEW_TABS.map((tab) => {
+                const active = previewTab === tab.id
+                const clothesConnected = tab.id === 'clothes' && activeClothing?.resultDataUrl
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setPreviewTab(tab.id)}
+                    className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 cursor-pointer flex items-center gap-1.5 ${
+                      active
+                        ? tab.id === 'clothes'
+                          ? 'bg-sky-950/50 border border-sky-500/30 text-sky-300 shadow-[0_0_12px_rgba(56,189,248,0.12)]'
+                          : 'bg-violet-950/50 border border-violet-500/30 text-violet-300 shadow-[0_0_12px_rgba(167,139,250,0.12)]'
+                        : tab.id === 'clothes'
+                          ? 'border border-sky-500/15 text-sky-400/90 hover:text-sky-300 hover:bg-sky-950/20'
+                          : 'border border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    {tab.id === 'clothes' && <Shirt size={12} />}
+                    {tab.label}
+                    {clothesConnected && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shadow-[0_0_6px_rgba(56,189,248,0.8)]" />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {previewTab === 'clothes' && (
+                <button
+                  className="px-4 py-2 text-xs font-bold rounded-xl border border-sky-500/30 bg-sky-950/40 text-sky-200 hover:bg-sky-900/50 hover:border-sky-400/50 transition-all duration-200 cursor-pointer flex items-center gap-1.5 shadow-[0_0_12px_rgba(56,189,248,0.08)]"
+                  onClick={importClothingTexture}
+                  disabled={clothingBusy === 'import'}
+                >
+                  <Upload size={13} />
+                  {clothingBusy === 'import' ? 'Importing…' : 'Import PNG'}
+                </button>
+              )}
+              {previewTab === 'clothes' && activeClothing?.resultDataUrl && (
+                <button
+                  className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-white/5 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05] hover:border-white/10 transition-all duration-200 cursor-pointer flex items-center gap-1.5"
+                  onClick={clearClothingTexture}
+                >
+                  <Trash2 size={12} /> Clear
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 relative">
+          <WorkflowViewport
+            previewTab={previewTab}
+            animationResult={animationResult}
+            clothingAsset={activeClothing}
+            accessories={accessories}
+            envParts={envParts}
+          />
+
+          {previewTab === 'clothes' && (
+            <ClothesTabOverlay
+              clothingAsset={activeClothing}
+              clothingWorkflow={clothingWorkflow}
+              clothingBusy={clothingBusy}
+              clothingNotice={clothingNotice}
+              onImport={importClothingTexture}
+              onClear={clearClothingTexture}
+              onAssetTypeChange={(assetType) => updateClothingWorkflow({ assetType })}
+              onOpenClothing={() => onChangeModule?.('clothing')}
+            />
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
-function WorkflowViewport({ animationResult, clothingAsset, accessories, envParts }) {
+function ClothesTabOverlay({
+  clothingAsset,
+  clothingWorkflow,
+  clothingBusy,
+  clothingNotice,
+  onImport,
+  onClear,
+  onAssetTypeChange,
+  onOpenClothing
+}) {
+  const assetType = clothingWorkflow?.assetType || 'shirt'
+
+  return (
+    <div className="absolute bottom-4 right-4 w-[280px] max-w-[calc(100%-2rem)] pointer-events-auto">
+      <div className="bg-[#0a0c14]/90 border border-sky-500/20 rounded-2xl p-4 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="text-xs font-bold text-sky-300 uppercase tracking-wide flex items-center gap-1.5">
+            <Shirt size={13} /> Clothes Preview
+          </div>
+          <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-sky-500/25 text-sky-400 bg-sky-950/40">
+            {assetType}
+          </span>
+        </div>
+
+        <div className="text-[11px] text-slate-400 leading-relaxed mb-3">
+          Import a classic Roblox shirt or pants PNG to preview it on the R15 rig. The 3D viewport
+          applies the texture as a skinned overlay on torso, arms, or legs.
+        </div>
+
+        <div className="flex gap-2 mb-3">
+          {['shirt', 'pants'].map((type) => {
+            const active = assetType === type
+            return (
+              <button
+                key={type}
+                className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all duration-200 cursor-pointer ${
+                  active
+                    ? 'bg-sky-950/40 border-sky-500/30 text-sky-300'
+                    : 'border-white/5 bg-white/[0.02] text-slate-400 hover:text-slate-200 hover:border-white/10'
+                }`}
+                onClick={() => onAssetTypeChange(type)}
+              >
+                {type === 'shirt' ? 'Shirt' : 'Pants'}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="flex gap-2 mb-3 flex-wrap">
+          <button
+            className="flex-1 px-3 py-2 text-xs font-semibold rounded-xl border border-sky-500/25 bg-sky-950/30 text-sky-300 hover:bg-sky-900/40 hover:border-sky-400/40 transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5"
+            onClick={onImport}
+            disabled={clothingBusy === 'import'}
+          >
+            <Upload size={12} />
+            {clothingBusy === 'import' ? 'Importing…' : 'Import PNG'}
+          </button>
+          {clothingAsset?.resultDataUrl && (
+            <button
+              className="px-3 py-2 text-xs font-semibold rounded-xl border border-white/5 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05] hover:border-white/10 transition-all duration-200 cursor-pointer flex items-center gap-1.5"
+              onClick={onClear}
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
+        </div>
+
+        {clothingNotice && (
+          <div className="mb-3 px-3 py-2 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-300 text-[11px] font-medium">
+            {clothingNotice}
+          </div>
+        )}
+
+        {clothingAsset?.resultDataUrl ? (
+          <div>
+            <img
+              src={clothingAsset.resultDataUrl}
+              alt="Imported classic clothing texture"
+              className="w-full rounded-xl border border-white/5 shadow-inner"
+            />
+            {clothingAsset.resultPath && (
+              <div className="text-[10px] text-slate-500 font-mono break-all leading-normal mt-2">
+                {clothingAsset.resultPath}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-sky-500/20 bg-sky-950/10 px-3 py-8 text-center">
+            <Shirt size={28} className="mx-auto text-sky-400/70 mb-2" />
+            <p className="text-sm font-bold text-sky-200">No clothing texture yet</p>
+            <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+              Import a finished PNG or generate one in Clothing Studio.
+            </p>
+            <button
+              className="mt-4 w-full px-4 py-2.5 text-xs font-bold rounded-xl border border-sky-500/30 bg-sky-950/40 text-sky-200 hover:bg-sky-900/50 hover:border-sky-400/50 transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5"
+              onClick={onImport}
+              disabled={clothingBusy === 'import'}
+            >
+              <Upload size={13} />
+              {clothingBusy === 'import' ? 'Importing…' : 'Import PNG'}
+            </button>
+            <button
+              className="mt-2 w-full px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-white/5 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06] hover:border-white/10 transition-all duration-200 cursor-pointer"
+              onClick={onOpenClothing}
+            >
+              Open Clothing Studio
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function WorkflowViewport({ previewTab, animationResult, clothingAsset, accessories, envParts }) {
   const mountRef = useRef(null)
   const stateRef = useRef({})
+  const previewTabRef = useRef(previewTab)
+  previewTabRef.current = previewTab
   const [rigReady, setRigReady] = useState(0)
   const [playing, setPlaying] = useState(true)
   const [status, setStatus] = useState({ rig: false, motion: false, clothing: false, error: null })
+  const clothesFocus = previewTab === 'clothes'
+  const clothingPreviewSrc = clothingAsset?.resultDataUrl || null
+  const visibleAccessories = clothesFocus ? [] : accessories
+  const visibleEnvParts = clothesFocus ? [] : envParts
 
   useEffect(() => {
     const el = mountRef.current
@@ -465,7 +763,7 @@ function WorkflowViewport({ animationResult, clothingAsset, accessories, envPart
     const s = stateRef.current
     if (!s.rigScene || !s.anchors) return
 
-    const currentIds = new Set(accessories.map((acc) => acc.id))
+    const currentIds = new Set(visibleAccessories.map((acc) => acc.id))
     for (const [id, entry] of s.accMap.entries()) {
       if (!currentIds.has(id)) {
         entry.anchor.remove(entry.object)
@@ -473,7 +771,7 @@ function WorkflowViewport({ animationResult, clothingAsset, accessories, envPart
       }
     }
 
-    for (const acc of accessories) {
+    for (const acc of visibleAccessories) {
       if (s.accMap.has(acc.id) || !acc.dataUrl) continue
 
       let buffer
@@ -515,13 +813,13 @@ function WorkflowViewport({ animationResult, clothingAsset, accessories, envPart
         (err) => setStatus((prev) => ({ ...prev, error: `Accessory parse failed: ${err.message}` }))
       )
     }
-  }, [accessories, rigReady])
+  }, [visibleAccessories, rigReady])
 
   useEffect(() => {
     const s = stateRef.current
     if (!s.scene) return
 
-    const parts = envParts.filter((part) => part.dataUrl)
+    const parts = visibleEnvParts.filter((part) => part.dataUrl)
     const currentIds = new Set(parts.map((part) => part.id))
 
     for (const [id, group] of s.envMap.entries()) {
@@ -568,7 +866,7 @@ function WorkflowViewport({ animationResult, clothingAsset, accessories, envPart
 
     layoutEnvironment(s)
     focusScene(s)
-  }, [envParts])
+  }, [visibleEnvParts])
 
   useEffect(() => {
     const s = stateRef.current
@@ -576,58 +874,79 @@ function WorkflowViewport({ animationResult, clothingAsset, accessories, envPart
 
     clearClothingOverlays(s)
 
-    if (!clothingAsset?.resultDataUrl) {
-      setStatus((prev) => ({ ...prev, clothing: false }))
-      focusScene(s)
-      return
+    let cancelled = false
+
+    async function applyClothingOverlays() {
+      const textureSource = await resolveClothingTextureSource(clothingAsset)
+      if (cancelled) return
+
+      if (!textureSource) {
+        setStatus((prev) => ({ ...prev, clothing: false }))
+        if (previewTabRef.current === 'clothes') focusClothingScene(s, clothingAsset?.assetType)
+        else focusScene(s)
+        return
+      }
+
+      const textureLoader = new THREE.TextureLoader()
+      textureLoader.load(
+        textureSource,
+        (texture) => {
+          if (cancelled) {
+            texture.dispose()
+            return
+          }
+
+          texture.colorSpace = THREE.SRGBColorSpace
+          texture.flipY = true
+          texture.needsUpdate = true
+
+          const overlays = applyClothingTextureToRig(s, texture, clothingAsset?.assetType)
+          s.clothingOverlays = overlays
+          setStatus((prev) => ({
+            ...prev,
+            clothing: overlays.length > 0,
+            error: overlays.length > 0 ? null : prev.error
+          }))
+
+          if (import.meta.env.DEV && overlays.length === 0) {
+            console.warn('[Playground] Clothing texture loaded but no R15 body meshes matched.', {
+              assetType: clothingAsset?.assetType || 'shirt'
+            })
+          }
+
+          if (previewTabRef.current === 'clothes') focusClothingScene(s, clothingAsset?.assetType)
+          else focusScene(s)
+        },
+        undefined,
+        (err) =>
+          setStatus((prev) => ({
+            ...prev,
+            clothing: false,
+            error: `Clothing overlay failed: ${err.message}`
+          }))
+      )
     }
 
-    const textureLoader = new THREE.TextureLoader()
-    textureLoader.load(
-      clothingAsset.resultDataUrl,
-      (texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace
-        texture.flipY = false
-        texture.needsUpdate = true
+    applyClothingOverlays().catch((err) => {
+      if (cancelled) return
+      setStatus((prev) => ({
+        ...prev,
+        clothing: false,
+        error: err.message || 'Clothing overlay failed.'
+      }))
+    })
 
-        const overlays = []
-        s.rigScene.traverse((obj) => {
-          if (!obj?.isSkinnedMesh || !isClothingTargetMesh(obj.name, clothingAsset.assetType)) return
+    return () => {
+      cancelled = true
+    }
+  }, [clothingAsset?.assetType, clothingAsset?.resultDataUrl, clothingAsset?.resultPath, rigReady])
 
-          const overlayMaterial = new THREE.MeshStandardMaterial({
-            map: texture,
-            transparent: true,
-            alphaTest: 0.05,
-            depthWrite: false
-          })
-          overlayMaterial.skinning = true
-          overlayMaterial.side = THREE.FrontSide
-          overlayMaterial.polygonOffset = true
-          overlayMaterial.polygonOffsetFactor = -1
-          overlayMaterial.polygonOffsetUnits = 1
-
-          const overlayMesh = new THREE.SkinnedMesh(obj.geometry, overlayMaterial)
-          overlayMesh.name = `__clothing_overlay_${clothingAsset.assetType}_${obj.name}`
-          overlayMesh.bind(obj.skeleton, obj.bindMatrix)
-          overlayMesh.bindMode = obj.bindMode
-          overlayMesh.renderOrder = (obj.renderOrder || 0) + 1
-          overlayMesh.castShadow = false
-          overlayMesh.receiveShadow = false
-          overlayMesh.position.copy(obj.position)
-          overlayMesh.quaternion.copy(obj.quaternion)
-          overlayMesh.scale.copy(obj.scale)
-          obj.parent?.add(overlayMesh)
-          overlays.push({ mesh: overlayMesh, material: overlayMaterial })
-        })
-
-        s.clothingOverlays = overlays
-        setStatus((prev) => ({ ...prev, clothing: overlays.length > 0, error: null }))
-        focusScene(s)
-      },
-      undefined,
-      (err) => setStatus((prev) => ({ ...prev, clothing: false, error: `Clothing overlay failed: ${err.message}` }))
-    )
-  }, [clothingAsset?.assetType, clothingAsset?.resultDataUrl, rigReady])
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s.rigScene) return
+    if (clothesFocus) focusClothingScene(s, clothingAsset?.assetType)
+    else focusScene(s)
+  }, [clothesFocus, rigReady, clothingAsset?.assetType])
 
   useEffect(() => {
     const s = stateRef.current
@@ -685,10 +1004,11 @@ function WorkflowViewport({ animationResult, clothingAsset, accessories, envPart
         s.playing = true
         setPlaying(true)
         setStatus((prev) => ({ ...prev, motion: true, error: null }))
-        focusScene(s)
+        if (clothesFocus) focusClothingScene(s, clothingAsset?.assetType)
+        else focusScene(s)
       })
       .catch((err) => setStatus((prev) => ({ ...prev, motion: false, error: err.message })))
-  }, [animationResult?.bvhPath, rigReady])
+  }, [animationResult?.bvhPath, rigReady, clothesFocus, clothingAsset?.assetType])
 
   function togglePlayback() {
     const s = stateRef.current
@@ -699,81 +1019,122 @@ function WorkflowViewport({ animationResult, clothingAsset, accessories, envPart
   }
 
   function focusCurrentScene() {
-    focusScene(stateRef.current)
+    const s = stateRef.current
+    if (clothesFocus) focusClothingScene(s, clothingAsset?.assetType)
+    else focusScene(s)
   }
 
   return (
-    <div style={{ position: 'relative', height: '100%' }}>
-      <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
+    <div className="relative h-full w-full bg-[#0a0c14]">
+      <div ref={mountRef} className="w-full h-full" />
 
-      <div
-        style={{
-          position: 'absolute',
-          top: 10,
-          left: 12,
-          display: 'flex',
-          gap: 8,
-          alignItems: 'center'
-        }}
-      >
-        <span style={badgeStyle('#555b6e')}>Connected Preview</span>
-        {status.rig && <span style={badgeStyle('#4ade80')}>R15 Ready</span>}
-        {status.motion && <span style={badgeStyle('#a78bfa')}>Motion Applied</span>}
-        {status.clothing && <span style={badgeStyle('#38bdf8')}>Clothing Applied</span>}
+      <div className="absolute top-4 left-4 flex flex-wrap gap-2 items-center pointer-events-none">
+        <span className="px-2.5 py-1 text-[11px] font-semibold tracking-wide rounded-full border border-white/5 bg-[#0a0c14]/80 text-slate-400 backdrop-blur-md">
+          {clothesFocus ? 'Clothes Preview' : 'Connected Preview'}
+        </span>
+        {status.rig && (
+          <span className="px-2.5 py-1 text-[11px] font-semibold tracking-wide rounded-full border border-emerald-500/20 bg-emerald-950/40 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.1)] backdrop-blur-md">
+            R15 Ready
+          </span>
+        )}
+        {status.motion && (
+          <span className="px-2.5 py-1 text-[11px] font-semibold tracking-wide rounded-full border border-violet-500/20 bg-violet-950/40 text-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.1)] backdrop-blur-md">
+            Motion Applied
+          </span>
+        )}
+        {status.clothing && (
+          <span className="px-2.5 py-1 text-[11px] font-semibold tracking-wide rounded-full border border-sky-500/20 bg-sky-950/40 text-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.1)] backdrop-blur-md">
+            Clothing Applied
+          </span>
+        )}
       </div>
 
-      <div style={{ position: 'absolute', top: 10, right: 12, display: 'flex', gap: 8 }}>
+      <div className="absolute top-4 right-4 flex gap-2">
         <button
           onClick={togglePlayback}
           disabled={!status.motion}
-          style={toolbarButton(!status.motion)}
+          className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl shadow-lg backdrop-blur-md transition-all duration-200 border ${
+            !status.motion
+              ? 'text-slate-500 bg-white/[0.01] border-white/5 cursor-not-allowed opacity-50'
+              : 'text-slate-200 bg-white/[0.03] hover:bg-white/[0.08] border-white/5 hover:border-white/10 active:scale-[0.98] cursor-pointer'
+          }`}
         >
           {playing ? 'Pause Motion' : 'Play Motion'}
         </button>
-        <button onClick={focusCurrentScene} style={toolbarButton(false)}>
+        <button
+          onClick={focusCurrentScene}
+          className="px-3.5 py-1.5 text-xs font-semibold text-slate-200 bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 hover:border-white/10 active:scale-[0.98] rounded-xl shadow-lg backdrop-blur-md cursor-pointer transition-all duration-200"
+        >
           Focus View
         </button>
       </div>
 
       {status.error && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 14,
-            left: 14,
-            right: 14,
-            display: 'flex',
-            justifyContent: 'center'
-          }}
-        >
-          <div
-            style={{
-              maxWidth: 560,
-              background: 'rgba(248,113,113,0.1)',
-              border: '1px solid rgba(248,113,113,0.25)',
-              borderRadius: 10,
-              padding: '10px 14px',
-              fontSize: 12,
-              color: '#fca5a5'
-            }}
-          >
+        <div className="absolute bottom-4 left-4 right-4 flex justify-center">
+          <div className="max-w-xl bg-red-950/40 border border-red-500/20 rounded-2xl px-4 py-3 text-xs text-red-300 shadow-[0_0_16px_rgba(239,68,68,0.15)] backdrop-blur-md leading-relaxed">
             {status.error}
           </div>
         </div>
       )}
 
-      {!animationResult?.bvhPath &&
+      {previewTab === 'clothes' && clothingPreviewSrc && (
+        <div className="absolute top-16 left-4 z-10 pointer-events-none max-w-[min(380px,44vw)]">
+          <div className="bg-[#0a0c14]/90 border border-sky-500/25 rounded-2xl p-3 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+            <div className="text-[10px] font-bold text-sky-300 uppercase tracking-wide mb-2">
+              2D Clothing Preview
+            </div>
+            <img
+              src={clothingPreviewSrc}
+              alt="Classic clothing texture preview"
+              className="w-full max-h-[min(52vh,520px)] object-contain rounded-xl border border-white/10 bg-black/20"
+            />
+            {!status.clothing && status.rig && (
+              <p className="text-[10px] text-amber-300/90 mt-2 leading-relaxed">
+                Texture loaded — applying 3D overlay to the R15 rig…
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {previewTab === 'clothes' && !clothingPreviewSrc && !clothingAsset?.resultPath && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-6 text-center select-none">
+          <div className="bg-slate-950/40 border border-sky-500/15 backdrop-blur-lg rounded-3xl p-6 max-w-sm shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+            <Shirt size={32} className="mx-auto text-sky-400/80 mb-3" />
+            <p className="text-sm font-bold text-sky-200 uppercase tracking-wider">
+              Import clothing to preview
+            </p>
+            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+              Click <strong className="text-sky-300">Import PNG</strong> above or in the panel
+              below to load a classic Roblox shirt or pants texture onto the R15 rig.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {previewTab === 'clothes' && !clothingPreviewSrc && clothingAsset?.resultPath && (
+        <div className="absolute top-16 left-4 z-10 pointer-events-none">
+          <div className="bg-[#0a0c14]/90 border border-sky-500/20 rounded-2xl px-4 py-3 text-xs text-sky-300 backdrop-blur-xl">
+            Loading clothing texture…
+          </div>
+        </div>
+      )}
+
+      {previewTab === 'overview' &&
+        !animationResult?.bvhPath &&
         !clothingAsset?.resultDataUrl &&
         accessories.length === 0 &&
         envParts.length === 0 && (
-        <div style={emptyStateStyle}>
-          <p style={{ fontSize: 15, fontWeight: 700, color: '#c4cad8', margin: 0 }}>
-            Nothing to preview yet
-          </p>
-          <p style={{ fontSize: 12, color: '#596071', margin: '8px 0 0' }}>
-            Generate animation, classic clothing, accessories, or environment parts and they will
-            appear here automatically.
-          </p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-6 text-center select-none">
+          <div className="bg-slate-950/40 border border-white/5 backdrop-blur-lg rounded-3xl p-6 max-w-sm shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+            <p className="text-sm font-bold text-slate-200 uppercase tracking-wider">
+              Nothing to preview yet
+            </p>
+            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+              Generate animation, classic clothing, accessories, or environment parts and they will
+              appear here automatically.
+            </p>
+          </div>
         </div>
       )}
     </div>
@@ -788,6 +1149,73 @@ function layoutEnvironment(state) {
     group.position.z = -2.2
     index += 1
   }
+}
+
+async function resolveClothingTextureSource(clothingAsset) {
+  if (!clothingAsset) return null
+  if (clothingAsset.resultDataUrl) return clothingAsset.resultDataUrl
+  if (!clothingAsset.resultPath || !window.api?.readFileAsDataURL) return null
+  const result = await window.api.readFileAsDataURL({ filePath: clothingAsset.resultPath })
+  return result.success ? result.dataUrl : null
+}
+
+function applyClothingTextureToRig(state, texture, assetType) {
+  if (!state?.rigScene || !texture) return []
+
+  const overlays = []
+  state.rigScene.traverse((obj) => {
+    if (!isClothingBodyMesh(obj) || !isClothingTargetMesh(obj, assetType)) return
+
+    const overlayMaterial = new THREE.MeshStandardMaterial({
+      map: texture,
+      transparent: true,
+      alphaTest: 0.05,
+      depthWrite: false,
+      depthTest: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1
+    })
+
+    const overlayMesh = obj.clone()
+    overlayMesh.material = overlayMaterial
+    overlayMesh.name = `__clothing_overlay_${assetType || 'shirt'}_${obj.name}`
+    overlayMesh.renderOrder = (obj.renderOrder || 0) + 1
+    overlayMesh.castShadow = false
+    overlayMesh.receiveShadow = false
+    overlayMesh.frustumCulled = false
+    obj.parent?.add(overlayMesh)
+    overlays.push({ mesh: overlayMesh, material: overlayMaterial, texture })
+  })
+
+  return overlays
+}
+
+function isClothingBodyMesh(obj) {
+  return Boolean(obj?.isMesh && !obj.name.startsWith('__clothing_overlay_'))
+}
+
+function focusClothingScene(state, assetType = 'shirt') {
+  if (!state?.camera || !state?.orbit || !state?.rigScene) return
+
+  const bounds = new THREE.Box3()
+  state.rigScene.traverse((obj) => {
+    if (!isClothingBodyMesh(obj)) return
+    if (!isClothingTargetMesh(obj, assetType)) return
+    bounds.expandByObject(obj)
+  })
+
+  if (bounds.isEmpty()) {
+    focusScene(state)
+    return
+  }
+
+  const center = bounds.getCenter(new THREE.Vector3())
+  const size = bounds.getSize(new THREE.Vector3())
+  const maxDim = Math.max(size.x, size.y, size.z, 1.2)
+  state.orbit.target.copy(center)
+  state.camera.position.set(center.x, center.y + maxDim * 0.15, center.z + maxDim * 1.35 + 0.8)
+  state.camera.lookAt(center)
 }
 
 function focusScene(state) {
@@ -814,55 +1242,28 @@ function clearClothingOverlays(state) {
   for (const overlay of state.clothingOverlays) {
     overlay.mesh.parent?.remove(overlay.mesh)
     overlay.material.dispose()
+    overlay.texture?.dispose()
   }
   state.clothingOverlays = []
 }
 
-function isClothingTargetMesh(name, assetType) {
+function isClothingTargetMesh(object, assetType) {
+  const names = [object?.name, object?.parent?.name].filter(Boolean)
+  return names.some((name) => isClothingTargetName(name, assetType))
+}
+
+function isClothingTargetName(name, assetType) {
   const normalized = normName(name)
   if (!normalized) return false
 
   const isTorso = normalized.includes('torso')
   const isArm = normalized.includes('arm')
+  const isHand = normalized.includes('hand')
   const isLeg = normalized.includes('leg') || normalized.includes('foot')
 
   if ((assetType || 'shirt') === 'pants') {
     return normalized.includes('lowertorso') || isLeg
   }
 
-  return isTorso || isArm
-}
-
-function badgeStyle(color) {
-  return {
-    fontSize: 11,
-    color,
-    background: 'rgba(10,11,16,0.72)',
-    border: '1px solid #1f2532',
-    borderRadius: 999,
-    padding: '4px 10px'
-  }
-}
-
-function toolbarButton(disabled) {
-  return {
-    border: '1px solid #2a3040',
-    borderRadius: 8,
-    padding: '7px 11px',
-    fontSize: 11,
-    fontWeight: 700,
-    color: disabled ? '#5a6070' : '#c4cad8',
-    background: disabled ? '#131821' : '#171b24',
-    cursor: disabled ? 'not-allowed' : 'pointer'
-  }
-}
-
-const emptyStateStyle = {
-  position: 'absolute',
-  inset: 0,
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  pointerEvents: 'none'
+  return isTorso || isArm || isHand
 }

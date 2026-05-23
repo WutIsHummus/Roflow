@@ -1,12 +1,24 @@
 /* eslint-disable react/prop-types */
 import { useState } from 'react'
+import {
+  Lightbulb,
+  Maximize2,
+  Video,
+  Activity,
+  FolderDown,
+  AlertCircle,
+  Play,
+  CheckCircle2,
+  UploadCloud,
+  FileVideo
+} from 'lucide-react'
 
 const S = {
   page: { height: '100%', overflowY: 'auto', padding: '24px 28px' },
   wrap: { maxWidth: 640 },
   infoCard: {
-    background: 'rgba(124,58,237,0.08)',
-    border: '1px solid rgba(124,58,237,0.2)',
+    background: 'rgba(124,58,237,0.06)',
+    border: '1px solid rgba(124,58,237,0.15)',
     borderRadius: 12,
     padding: 16,
     display: 'flex',
@@ -14,52 +26,61 @@ const S = {
     marginBottom: 20
   },
   infoText: { fontSize: 13, color: '#9499a8', lineHeight: 1.6 },
-  infoTitle: { fontSize: 13, fontWeight: 600, color: '#c4b5fd', marginBottom: 4 },
-  infoNote: { fontSize: 11, color: '#555b6e', marginTop: 6 },
-  label: { display: 'block', fontSize: 13, fontWeight: 600, color: '#9499a8', marginBottom: 8 },
+  infoTitle: { fontSize: 13, fontWeight: 700, color: '#c4b5fd', marginBottom: 4 },
+  infoNote: { fontSize: 11, color: '#64748b', marginTop: 6, fontWeight: 500 },
+  label: { display: 'block', fontSize: 13, fontWeight: 700, color: '#94a3b8', marginBottom: 8 },
   tipGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 },
   tipCard: {
-    background: '#1a1d26',
-    border: '1px solid #2e3340',
+    background: 'rgba(16, 19, 28, 0.4)',
+    backdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
     borderRadius: 10,
-    padding: '12px 8px',
-    textAlign: 'center'
+    padding: '16px 12px',
+    textAlign: 'center',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 8
   },
-  tipText: { fontSize: 11, color: '#555b6e', marginTop: 6 },
+  tipText: { fontSize: 11, fontWeight: 500, color: '#94a3b8' },
   errBox: {
-    background: 'rgba(248,113,113,0.08)',
-    border: '1px solid rgba(248,113,113,0.25)',
-    borderRadius: 8,
-    padding: '10px 14px',
+    background: 'rgba(248,113,113,0.06)',
+    border: '1px solid rgba(248,113,113,0.18)',
+    borderRadius: 10,
+    padding: '12px 14px',
     fontSize: 13,
     color: '#fca5a5',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 16
   },
   btnPrimary: {
     width: '100%',
-    padding: '11px 0',
+    padding: '12px 20px',
     borderRadius: 10,
     fontWeight: 700,
     fontSize: 14,
-    background: 'linear-gradient(135deg,#7c3aed,#a78bfa)',
-    color: '#fff',
+    background: 'rgba(255, 255, 255, 0.9)',
+    color: '#0c0e17',
     border: 'none',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    boxShadow: '0 4px 20px rgba(124,58,237,0.3)'
+    boxShadow: '0 4px 16px rgba(255, 255, 255, 0.05)',
+    transition: 'all 0.15s'
   },
   btnDisabled: {
     width: '100%',
-    padding: '11px 0',
+    padding: '12px 20px',
     borderRadius: 10,
     fontWeight: 700,
     fontSize: 14,
-    background: '#1a1d26',
-    color: '#3e4455',
-    border: '1px solid #252a36',
+    background: 'rgba(255,255,255,0.02)',
+    color: '#475569',
+    border: '1px solid rgba(255,255,255,0.05)',
     cursor: 'not-allowed',
     display: 'flex',
     alignItems: 'center',
@@ -67,9 +88,10 @@ const S = {
     gap: 8
   },
   resultCard: {
-    background: '#1a1d26',
-    border: '1px solid #2e3340',
-    borderRadius: 12,
+    background: 'rgba(16, 19, 28, 0.4)',
+    backdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    borderRadius: 14,
     padding: 20,
     marginTop: 20
   },
@@ -85,78 +107,102 @@ const S = {
     flexShrink: 0
   },
   infoBox: {
-    background: '#111318',
+    background: 'rgba(0,0,0,0.15)',
+    border: '1px solid rgba(255,255,255,0.04)',
     borderRadius: 8,
-    padding: '10px 14px',
+    padding: '12px 14px',
     marginBottom: 14,
-    fontFamily: 'monospace',
     fontSize: 12,
-    color: '#6b7280',
-    lineHeight: 1.8
+    color: '#94a3b8',
+    lineHeight: 1.8,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6
   },
   btnGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   btnExport: {
-    padding: '10px 0',
-    borderRadius: 8,
-    fontWeight: 600,
+    padding: '11px 18px',
+    borderRadius: 10,
+    fontWeight: 700,
     fontSize: 13,
     border: 'none',
-    background: 'linear-gradient(135deg,#7c3aed,#a78bfa)',
-    color: '#fff',
+    background: 'rgba(255, 255, 255, 0.9)',
+    color: '#0c0e17',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6
+    gap: 8,
+    boxShadow: '0 4px 16px rgba(255, 255, 255, 0.05)',
+    transition: 'all 0.15s'
   },
   btnSecondary: {
-    padding: '10px 0',
-    borderRadius: 8,
-    fontWeight: 600,
+    padding: '11px 18px',
+    borderRadius: 10,
+    fontWeight: 700,
     fontSize: 13,
-    background: '#1f2330',
-    color: '#9499a8',
-    border: '1px solid #2e3340',
+    background: 'rgba(255,255,255,0.03)',
+    color: '#94a3b8',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6
+    gap: 8,
+    transition: 'all 0.15s'
   },
-  footNote: { fontSize: 11, color: '#3e4455', marginTop: 10 }
+  footNote: { fontSize: 11, fontWeight: 500, color: '#475569', marginTop: 10 }
 }
 
-export default function VideoToAnimation({ onProgress, onResult, onClear, result }) {
-  const [videoPath, setVideoPath] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+export default function VideoToAnimation({
+  videoForm,
+  activeJob,
+  error,
+  result,
+  onVideoFormChange,
+  onPatchWorkflow,
+  onClear
+}) {
+  const { videoPath } = videoForm
+  const loading = activeJob?.type === 'video' && activeJob?.status === 'running'
   const [hover, setHover] = useState(false)
 
   async function pickVideo() {
     const p = await window.api.openVideo()
-    if (p) setVideoPath(p)
+    if (p) onVideoFormChange({ videoPath: p })
   }
 
   async function extract() {
     if (!videoPath) return
-    setLoading(true)
-    setError(null)
     onClear()
-    onResult(null)
+    onPatchWorkflow({
+      activeJob: { type: 'video', status: 'running' },
+      result: null,
+      error: null,
+      progress: null
+    })
     try {
       const res = await window.api.videoToMotion({ videoPath })
       if (res.success) {
-        onResult({ bvhPath: res.bvhPath, type: 'video', videoPath })
-        onProgress({ step: 'Pose extraction complete!', pct: 100 })
+        onPatchWorkflow({
+          result: { bvhPath: res.bvhPath, type: 'video', videoPath },
+          activeJob: null,
+          progress: { step: 'Pose extraction complete!', pct: 100 },
+          error: null
+        })
       } else {
-        setError(res.error)
-        onProgress(null)
+        onPatchWorkflow({
+          error: res.error,
+          activeJob: null,
+          progress: null
+        })
       }
     } catch (e) {
-      setError(e.message)
-      onProgress(null)
-    } finally {
-      setLoading(false)
+      onPatchWorkflow({
+        error: e.message,
+        activeJob: null,
+        progress: null
+      })
     }
   }
 
@@ -170,7 +216,7 @@ export default function VideoToAnimation({ onProgress, onResult, onClear, result
     if (!outputPath) return
     const res = await window.api.exportFBX({ bvhPath: result.bvhPath, outputPath })
     if (res.success) window.api.openPath(res.outputPath)
-    else setError(res.error || 'FBX export failed.')
+    else onPatchWorkflow({ error: res.error || 'FBX export failed.' })
   }
 
   async function exportBVH() {
@@ -183,7 +229,7 @@ export default function VideoToAnimation({ onProgress, onResult, onClear, result
     if (!outputPath) return
     const res = await window.api.exportBVH({ sourcePath: result.bvhPath, outputPath })
     if (res.success) window.api.openPath(outputPath)
-    else setError(res.error || 'BVH export failed.')
+    else onPatchWorkflow({ error: res.error || 'BVH export failed.' })
   }
 
   const fileName = videoPath ? videoPath.split(/[\\/]/).pop() : null
@@ -194,12 +240,19 @@ export default function VideoToAnimation({ onProgress, onResult, onClear, result
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-    borderRadius: 12,
-    border: `2px dashed ${videoPath ? '#7c3aed' : hover ? '#4b5063' : '#2e3340'}`,
+    borderRadius: 14,
+    border: `1px ${videoPath ? 'solid' : 'dashed'} ${
+      videoPath ? 'rgba(167,139,250,0.4)' : hover ? 'rgba(167,139,250,0.25)' : 'rgba(255,255,255,0.08)'
+    }`,
     padding: '40px 20px',
     cursor: 'pointer',
     marginBottom: 20,
-    background: videoPath ? 'rgba(124,58,237,0.05)' : hover ? '#1a1d26' : 'transparent',
+    background: videoPath
+      ? 'rgba(124,58,237,0.04)'
+      : hover
+        ? 'rgba(255,255,255,0.02)'
+        : 'rgba(16,19,28,0.4)',
+    backdropFilter: 'blur(20px)',
     transition: 'all 0.15s'
   }
 
@@ -207,19 +260,7 @@ export default function VideoToAnimation({ onProgress, onResult, onClear, result
     <div style={S.page}>
       <div style={S.wrap}>
         <div style={S.infoCard}>
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#a78bfa"
-            strokeWidth="1.8"
-            width="18"
-            height="18"
-            style={{ flexShrink: 0, marginTop: 2 }}
-          >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
+          <AlertCircle size={16} className="text-purple-400 flex-shrink-0 mt-0.5" />
           <div>
             <p style={S.infoTitle}>How it works</p>
             <p style={S.infoText}>
@@ -245,30 +286,25 @@ export default function VideoToAnimation({ onProgress, onResult, onClear, result
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: videoPath ? 'rgba(124,58,237,0.15)' : '#1a1d26'
+              background: videoPath ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.03)',
+              border: '1px solid rgba(255,255,255,0.05)'
             }}
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={videoPath ? '#a78bfa' : '#555b6e'}
-              strokeWidth="1.8"
-              width="24"
-              height="24"
-            >
-              <rect x="2" y="2" width="20" height="20" rx="2.18" />
-              <path d="M10 8l6 4-6 4V8z" />
-            </svg>
+            {videoPath ? (
+              <FileVideo size={20} className="text-purple-400" />
+            ) : (
+              <UploadCloud size={20} className="text-slate-500" />
+            )}
           </div>
           {videoPath ? (
             <div style={{ textAlign: 'center' }}>
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#a78bfa' }}>{fileName}</p>
-              <p style={{ fontSize: 11, color: '#555b6e', marginTop: 4 }}>Click to change file</p>
+              <p style={{ fontSize: 13, fontWeight: 600, color: '#c4b5fd' }}>{fileName}</p>
+              <p style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>Click to change file</p>
             </div>
           ) : (
             <div style={{ textAlign: 'center' }}>
-              <p style={{ fontSize: 13, color: '#9499a8' }}>Click to select video</p>
-              <p style={{ fontSize: 11, color: '#555b6e', marginTop: 4 }}>
+              <p style={{ fontSize: 13, color: '#94a3b8' }}>Click to select video</p>
+              <p style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
                 MP4, MOV, AVI, MKV, WebM
               </p>
             </div>
@@ -277,23 +313,40 @@ export default function VideoToAnimation({ onProgress, onResult, onClear, result
 
         <div style={S.tipGrid}>
           {[
-            ['💡', 'Single person in frame'],
-            ['📐', 'Full body visible'],
-            ['🎥', 'Good lighting']
-          ].map(([icon, tip]) => (
+            { icon: <Activity size={18} className="text-purple-400" />, tip: 'Single person in frame' },
+            { icon: <Maximize2 size={18} className="text-purple-400" />, tip: 'Full body visible' },
+            { icon: <Video size={18} className="text-purple-400" />, tip: 'Good lighting' }
+          ].map(({ icon, tip }) => (
             <div key={tip} style={S.tipCard}>
-              <span style={{ fontSize: 20 }}>{icon}</span>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>{icon}</div>
               <p style={S.tipText}>{tip}</p>
             </div>
           ))}
         </div>
 
-        {error && <div style={S.errBox}>{error}</div>}
+        {error && (
+          <div style={S.errBox}>
+            <AlertCircle size={14} className="text-red-400 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
 
         <button
           onClick={extract}
           disabled={loading || !videoPath}
           style={loading || !videoPath ? S.btnDisabled : S.btnPrimary}
+          onMouseEnter={(e) => {
+            if (!loading && videoPath) {
+              e.currentTarget.style.transform = 'translateY(-1px)'
+              e.currentTarget.style.boxShadow = '0 6px 20px rgba(255,255,255,0.06)'
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!loading && videoPath) {
+              e.currentTarget.style.transform = 'translateY(0)'
+              e.currentTarget.style.boxShadow = '0 4px 16px rgba(255,255,255,0.05)'
+            }
+          }}
         >
           {loading ? (
             <>
@@ -301,7 +354,7 @@ export default function VideoToAnimation({ onProgress, onResult, onClear, result
             </>
           ) : (
             <>
-              <SkeletonIcon /> Extract Skeleton
+              <Play size={14} className="text-current fill-current" /> Extract Skeleton
             </>
           )}
         </button>
@@ -310,36 +363,44 @@ export default function VideoToAnimation({ onProgress, onResult, onClear, result
           <div style={S.resultCard}>
             <div style={S.successRow}>
               <div style={S.successIcon}>
-                <CheckIcon />
+                <CheckCircle2 size={16} className="text-emerald-400" />
               </div>
               <div>
                 <p style={{ fontSize: 13, fontWeight: 700, color: '#4ade80' }}>
                   Skeleton Extracted!
                 </p>
-                <p style={{ fontSize: 11, color: '#555b6e', marginTop: 2 }}>{fileName}</p>
+                <p style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{fileName}</p>
               </div>
             </div>
             <div style={S.infoBox}>
-              <p>🦴 BVH ready for Roblox R15 retargeting</p>
-              <p>📦 Export FBX to import into Roblox Studio</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Activity size={12} className="text-purple-400" />
+                <span>BVH bone structure ready for Roblox R15 retargeting</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <FolderDown size={12} className="text-purple-400" />
+                <span>Export FBX format to import into Roblox Studio directly</span>
+              </div>
             </div>
             <div style={S.btnGrid}>
               <button style={S.btnExport} onClick={exportFBX}>
-                <DownloadIcon /> Export FBX
+                <FolderDown size={14} /> Export FBX
               </button>
               <button
                 style={S.btnSecondary}
                 onClick={exportBVH}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#252a36'
-                  e.currentTarget.style.color = '#eef0f6'
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.06)'
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'
+                  e.currentTarget.style.color = '#f1f5f9'
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#1f2330'
-                  e.currentTarget.style.color = '#9499a8'
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
+                  e.currentTarget.style.color = '#94a3b8'
                 }}
               >
-                <DownloadIcon /> Export BVH
+                <FolderDown size={14} /> Export BVH
               </button>
             </div>
             <p style={S.footNote}>FBX → Roblox Studio Animation Editor · BVH → Blender</p>
@@ -353,7 +414,7 @@ export default function VideoToAnimation({ onProgress, onResult, onClear, result
 function SpinIcon() {
   return (
     <svg
-      style={{ animation: 'spin 1s linear infinite', width: 16, height: 16 }}
+      style={{ animation: 'spin 1s linear infinite', width: 14, height: 14 }}
       viewBox="0 0 24 24"
       fill="none"
     >
@@ -364,44 +425,6 @@ function SpinIcon() {
         fillOpacity="0.75"
         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
       />
-    </svg>
-  )
-}
-function SkeletonIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <circle cx="12" cy="7" r="4" />
-      <path d="M12 11v10M9 14h6" />
-    </svg>
-  )
-}
-function CheckIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  )
-}
-function DownloadIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
   )
 }

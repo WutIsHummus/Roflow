@@ -1,7 +1,7 @@
 {
   "name": "ai-game-dev-hub",
   "version": "1.0.0",
-  "description": "An Electron application with React",
+  "description": "RoFlow — AI-powered Roblox game development toolkit",
   "main": "./out/main/index.js",
   "author": "example.com",
   "homepage": "https://electron-vite.org",

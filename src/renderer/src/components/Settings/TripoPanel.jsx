@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { useEffect, useState } from 'react'
 
 const STYLES = [
@@ -14,33 +13,27 @@ const STYLES = [
 
 const VERSIONS = [
   { id: 'v3.1-20260211', label: 'v3.1 (Latest)' },
-  { id: 'v3.0-20250421', label: 'v3.0 (Quality)' },
   { id: 'v2.5-20250123', label: 'v2.5' },
   { id: 'v2.0-20240919', label: 'v2.0 (Fast)' }
-]
-
-const DOWNLOAD_FORMATS = [
-  { id: 'glb', label: 'GLB' },
-  { id: 'fbx', label: 'FBX' },
-  { id: 'obj', label: 'OBJ' },
-  { id: 'stl', label: 'STL' }
 ]
 
 const DEFAULT_TRIPO_WEB_BASE_URL = 'https://studio.tripo3d.ai/'
 const DEFAULT_TRIPO_WEB_GENERATE_URL = 'https://studio.tripo3d.ai/workspace/generate'
 
-export default function TripoPanel({ options, onChange }) {
-  const [webBaseUrl, setWebBaseUrl] = useState(options.webBaseUrl || DEFAULT_TRIPO_WEB_BASE_URL)
-  const [webGenerateUrl, setWebGenerateUrl] = useState(
-    options.webGenerateUrl || DEFAULT_TRIPO_WEB_GENERATE_URL
-  )
-  const [showBrowserAutomation, setShowBrowserAutomation] = useState(
-    options.showBrowserAutomation !== false
-  )
+export default function TripoPanel() {
+  const [webBaseUrl, setWebBaseUrl] = useState(DEFAULT_TRIPO_WEB_BASE_URL)
+  const [webGenerateUrl, setWebGenerateUrl] = useState(DEFAULT_TRIPO_WEB_GENERATE_URL)
+  const [showBrowserAutomation, setShowBrowserAutomation] = useState(true)
+  const [modelVersion, setModelVersion] = useState('v3.1-20260211')
+  const [style, setStyle] = useState(null)
+  const [texture, setTexture] = useState(true)
+  const [pbr, setPbr] = useState(true)
+  const [smartLowPoly, setSmartLowPoly] = useState(false)
   const [webStatus, setWebStatus] = useState('idle')
   const [webMsg, setWebMsg] = useState('')
   const [webMeta, setWebMeta] = useState(null)
   const [savedMsg, setSavedMsg] = useState('')
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -48,44 +41,29 @@ export default function TripoPanel({ options, onChange }) {
     Promise.all([
       window.api.configGet('tripoWebBaseUrl'),
       window.api.configGet('tripoWebGenerateUrl'),
-      window.api.configGet('tripoShowBrowserAutomation')
-    ]).then(([baseUrl, generateUrl, showBrowser]) => {
+      window.api.configGet('tripoShowBrowserAutomation'),
+      window.api.configGet('tripoModelVersion'),
+      window.api.configGet('tripoStyle'),
+      window.api.configGet('tripoTexture'),
+      window.api.configGet('tripoPbr'),
+      window.api.configGet('tripoSmartLowPoly')
+    ]).then(([baseUrl, generateUrl, showBrowser, version, styleVal, textureVal, pbrVal, lowPoly]) => {
       if (!active) return
       if (baseUrl) setWebBaseUrl(baseUrl)
       if (generateUrl) setWebGenerateUrl(generateUrl)
       if (typeof showBrowser === 'boolean') setShowBrowserAutomation(showBrowser)
+      if (version) setModelVersion(version)
+      if (styleVal !== undefined) setStyle(styleVal)
+      if (typeof textureVal === 'boolean') setTexture(textureVal)
+      if (typeof pbrVal === 'boolean') setPbr(pbrVal)
+      if (typeof lowPoly === 'boolean') setSmartLowPoly(lowPoly)
+      setLoaded(true)
     })
 
     return () => {
       active = false
     }
   }, [])
-
-  useEffect(() => {
-    onChange({
-      authMode: 'web',
-      webBaseUrl: webBaseUrl.trim() || DEFAULT_TRIPO_WEB_BASE_URL,
-      webGenerateUrl: webGenerateUrl.trim() || webBaseUrl.trim() || DEFAULT_TRIPO_WEB_GENERATE_URL,
-      showBrowserAutomation,
-      modelVersion: options.modelVersion || 'v3.1-20260211',
-      texture: options.texture !== false,
-      pbr: options.pbr !== false,
-      smartLowPoly: !!options.smartLowPoly,
-      style: options.style || null,
-      downloadFormat: options.downloadFormat || 'glb'
-    })
-  }, [
-    onChange,
-    options.modelVersion,
-    options.pbr,
-    options.smartLowPoly,
-    options.style,
-    options.texture,
-    options.downloadFormat,
-    showBrowserAutomation,
-    webBaseUrl,
-    webGenerateUrl
-  ])
 
   async function saveSettings() {
     await window.api.configSet('tripoAuthMode', 'web')
@@ -95,11 +73,11 @@ export default function TripoPanel({ options, onChange }) {
       webGenerateUrl.trim() || webBaseUrl.trim() || DEFAULT_TRIPO_WEB_GENERATE_URL
     )
     await window.api.configSet('tripoShowBrowserAutomation', showBrowserAutomation)
-    await window.api.configSet('tripoModelVersion', options.modelVersion || 'v3.1-20260211')
-    await window.api.configSet('tripoStyle', options.style ?? null)
-    await window.api.configSet('tripoTexture', options.texture !== false)
-    await window.api.configSet('tripoPbr', options.pbr !== false)
-    await window.api.configSet('tripoSmartLowPoly', !!options.smartLowPoly)
+    await window.api.configSet('tripoModelVersion', modelVersion || 'v3.1-20260211')
+    await window.api.configSet('tripoStyle', style ?? null)
+    await window.api.configSet('tripoTexture', texture !== false)
+    await window.api.configSet('tripoPbr', pbr !== false)
+    await window.api.configSet('tripoSmartLowPoly', !!smartLowPoly)
     setSavedMsg('Saved')
     setTimeout(() => setSavedMsg(''), 2000)
   }
@@ -187,6 +165,10 @@ export default function TripoPanel({ options, onChange }) {
     error: '#f87171'
   }[webStatus]
 
+  if (!loaded) {
+    return <div style={{ fontSize: 12, color: '#555b6e' }}>Loading Tripo settings…</div>
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div
@@ -202,7 +184,7 @@ export default function TripoPanel({ options, onChange }) {
         </div>
         <div style={{ fontSize: 11, color: '#7c8396', lineHeight: 1.7 }}>
           Modeling runs through your normal Tripo website account in a persistent Electron browser
-          window. Alternate provider and API fallback paths have been removed.
+          window.
         </div>
       </div>
 
@@ -385,11 +367,7 @@ export default function TripoPanel({ options, onChange }) {
         >
           Model Version
         </label>
-        <select
-          value={options.modelVersion || 'v3.1-20260211'}
-          onChange={(e) => onChange({ ...options, modelVersion: e.target.value, authMode: 'web' })}
-          style={sel}
-        >
+        <select value={modelVersion} onChange={(e) => setModelVersion(e.target.value)} style={sel}>
           {VERSIONS.map((version) => (
             <option key={version.id} value={version.id}>
               {version.label}
@@ -413,46 +391,16 @@ export default function TripoPanel({ options, onChange }) {
           Style
         </label>
         <select
-          value={options.style || ''}
-          onChange={(e) => onChange({ ...options, style: e.target.value || null, authMode: 'web' })}
+          value={style || ''}
+          onChange={(e) => setStyle(e.target.value || null)}
           style={sel}
         >
-          {STYLES.map((style) => (
-            <option key={style.id || ''} value={style.id || ''}>
-              {style.label}
+          {STYLES.map((styleOption) => (
+            <option key={styleOption.id || ''} value={styleOption.id || ''}>
+              {styleOption.label}
             </option>
           ))}
         </select>
-      </div>
-
-      <div>
-        <label
-          style={{
-            display: 'block',
-            fontSize: 11,
-            fontWeight: 600,
-            color: '#555b6e',
-            marginBottom: 6,
-            textTransform: 'uppercase',
-            letterSpacing: '0.07em'
-          }}
-        >
-          Download Format
-        </label>
-        <select
-          value={options.downloadFormat || 'glb'}
-          onChange={(e) => onChange({ ...options, downloadFormat: e.target.value, authMode: 'web' })}
-          style={sel}
-        >
-          {DOWNLOAD_FORMATS.map((fmt) => (
-            <option key={fmt.id} value={fmt.id}>
-              {fmt.label}
-            </option>
-          ))}
-        </select>
-        <p style={{ fontSize: 10, color: '#3e4455', marginTop: 5 }}>
-          GLB recommended for Roblox and Playground preview
-        </p>
       </div>
 
       <div>
@@ -470,52 +418,19 @@ export default function TripoPanel({ options, onChange }) {
           Options
         </label>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button
-            style={tog(options.texture !== false)}
-            onClick={() => onChange({ ...options, texture: !options.texture, authMode: 'web' })}
-          >
+          <button style={tog(texture !== false)} onClick={() => setTexture(!texture)}>
             Texture
           </button>
-          <button
-            style={tog(options.pbr !== false)}
-            onClick={() => onChange({ ...options, pbr: !options.pbr, authMode: 'web' })}
-          >
+          <button style={tog(pbr !== false)} onClick={() => setPbr(!pbr)}>
             PBR
           </button>
-          <button
-            style={tog(!!options.smartLowPoly)}
-            onClick={() =>
-              onChange({ ...options, smartLowPoly: !options.smartLowPoly, authMode: 'web' })
-            }
-          >
+          <button style={tog(!!smartLowPoly)} onClick={() => setSmartLowPoly(!smartLowPoly)}>
             Low Poly
           </button>
         </div>
         <p style={{ fontSize: 10, color: '#3e4455', marginTop: 5 }}>
           Low Poly = optimized for Roblox · PBR = physically-based materials
         </p>
-      </div>
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '8px 12px',
-          background: 'rgba(124,58,237,0.06)',
-          border: '1px solid rgba(124,58,237,0.12)',
-          borderRadius: 8
-        }}
-      >
-        <span style={{ fontSize: 18 }}>⬡</span>
-        <div>
-          <p style={{ fontSize: 12, fontWeight: 600, color: '#c4b5fd' }}>
-            Tripo3D — Browser Session
-          </p>
-          <p style={{ fontSize: 10, color: '#555b6e' }}>
-            Uses your logged-in Tripo website session instead of alternate providers.
-          </p>
-        </div>
       </div>
     </div>
   )

@@ -1,5 +1,17 @@
 /* eslint-disable react/prop-types */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Settings,
+  Sparkles,
+  Plus,
+  Trash2,
+  Image as ImageIcon,
+  RotateCcw,
+  Copy,
+  FolderDown,
+  Sparkle,
+  Compass
+} from 'lucide-react'
 
 let nextInstanceId = 1
 
@@ -238,25 +250,153 @@ function buildImagePrompt(workflow, inst) {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const S = {
-  page: { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f1116' },
-  header: { padding: '14px 20px 0', borderBottom: '1px solid #1e2330', flexShrink: 0 },
-  title: { fontSize: 16, fontWeight: 700, color: '#eef0f6', margin: 0 },
-  body: { flex: 1, display: 'flex', minHeight: 0 },
-  rail: { width: 240, borderRight: '1px solid #1e2330', display: 'flex', flexDirection: 'column', minHeight: 0 },
-  canvas: { flex: 1, minWidth: 0, background: '#090b0f', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  side: { width: 300, borderLeft: '1px solid #1e2330', overflowY: 'auto', padding: 16 },
-  card: { background: '#141821', border: '1px solid #202533', borderRadius: 10, padding: 12, marginBottom: 10 },
-  label: { display: 'block', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#7c8499', marginBottom: 5 },
-  input: { width: '100%', background: '#0d0f14', border: '1px solid #252a36', borderRadius: 8, padding: '7px 10px', fontSize: 12, color: '#eef0f6', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' },
-  textarea: { width: '100%', background: '#0d0f14', border: '1px solid #252a36', borderRadius: 8, padding: '7px 10px', fontSize: 11, color: '#c4cad8', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.6 },
-  btn: { border: '1px solid #2a3040', borderRadius: 8, padding: '7px 10px', fontSize: 11, fontWeight: 700, background: '#171b24', color: '#c4cad8', cursor: 'pointer' },
-  primaryBtn: { border: 'none', borderRadius: 8, padding: '7px 10px', fontSize: 11, fontWeight: 700, background: 'linear-gradient(135deg,#7c3aed,#a78bfa)', color: '#fff', cursor: 'pointer' },
-  select: { width: '100%', background: '#0d0f14', border: '1px solid #252a36', borderRadius: 8, padding: '7px 10px', fontSize: 12, color: '#eef0f6', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }
+  page: { 
+    display: 'flex', 
+    flexDirection: 'column', 
+    height: '100%', 
+    background: 'radial-gradient(circle at top left, rgba(20, 24, 33, 0.4), rgba(10, 11, 15, 0.6))',
+    backdropFilter: 'blur(20px)',
+    position: 'relative',
+    overflow: 'hidden'
+  },
+  header: { 
+    padding: '20px 24px 12px', 
+    borderBottom: '1px solid rgba(255,255,255,0.05)', 
+    background: 'rgba(0,0,0,0.15)',
+    flexShrink: 0 
+  },
+  title: { 
+    fontSize: 18, 
+    fontWeight: 800, 
+    letterSpacing: '-0.02em',
+    color: '#eef0f6', 
+    margin: 0 
+  },
+  body: { 
+    flex: 1, 
+    display: 'flex', 
+    minHeight: 0 
+  },
+  rail: { 
+    width: 260, 
+    borderRight: '1px solid rgba(255,255,255,0.05)', 
+    display: 'flex', 
+    flexDirection: 'column', 
+    minHeight: 0,
+    background: 'rgba(0,0,0,0.08)'
+  },
+  canvas: { 
+    flex: 1, 
+    minWidth: 0, 
+    background: 'radial-gradient(circle at center, rgba(16, 19, 28, 0.3) 0%, rgba(9, 10, 15, 0.6) 100%)', 
+    position: 'relative', 
+    overflow: 'hidden', 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  side: { 
+    width: 320, 
+    borderLeft: '1px solid rgba(255,255,255,0.05)', 
+    overflowY: 'auto', 
+    padding: 16,
+    background: 'rgba(0,0,0,0.08)'
+  },
+  card: { 
+    background: 'rgba(16, 19, 28, 0.4)', 
+    backdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255, 255, 255, 0.08)', 
+    borderRadius: 12, 
+    padding: 14, 
+    marginBottom: 12,
+    boxShadow: '0 4px 24px rgba(0,0,0,0.15)'
+  },
+  label: { 
+    display: 'block', 
+    fontSize: 10, 
+    fontWeight: 800, 
+    textTransform: 'uppercase', 
+    letterSpacing: '0.08em', 
+    color: '#64748b', 
+    marginBottom: 6 
+  },
+  input: { 
+    width: '100%', 
+    background: 'rgba(9, 10, 15, 0.6)', 
+    border: '1px solid rgba(255,255,255,0.05)', 
+    borderRadius: 8, 
+    padding: '9px 12px', 
+    fontSize: 12, 
+    color: '#eef0f6', 
+    outline: 'none', 
+    boxSizing: 'border-box', 
+    fontFamily: 'inherit',
+    transition: 'all 0.2s'
+  },
+  textarea: { 
+    width: '100%', 
+    background: 'rgba(9, 10, 15, 0.6)', 
+    border: '1px solid rgba(255,255,255,0.05)', 
+    borderRadius: 8, 
+    padding: '9px 12px', 
+    fontSize: 11, 
+    color: '#c4cad8', 
+    outline: 'none', 
+    boxSizing: 'border-box', 
+    fontFamily: 'inherit', 
+    resize: 'vertical', 
+    lineHeight: 1.6,
+    transition: 'all 0.2s'
+  },
+  btn: { 
+    border: '1px solid rgba(255,255,255,0.08)', 
+    borderRadius: 10, 
+    padding: '10px 18px', 
+    fontSize: 12, 
+    fontWeight: 700, 
+    background: 'rgba(255, 255, 255, 0.04)', 
+    color: '#cbd5e1', 
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    transition: 'all 0.2s'
+  },
+  primaryBtn: { 
+    border: 'none', 
+    borderRadius: 10, 
+    padding: '10px 18px', 
+    fontSize: 12, 
+    fontWeight: 700, 
+    background: 'rgba(255, 255, 255, 0.9)', 
+    color: '#0c0e17', 
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    boxShadow: '0 4px 16px rgba(255, 255, 255, 0.05)',
+    transition: 'all 0.2s'
+  },
+  select: { 
+    width: '100%', 
+    background: 'rgba(9, 10, 15, 0.6)', 
+    border: '1px solid rgba(255,255,255,0.05)', 
+    borderRadius: 8, 
+    padding: '9px 12px', 
+    fontSize: 12, 
+    color: '#eef0f6', 
+    outline: 'none', 
+    boxSizing: 'border-box', 
+    fontFamily: 'inherit',
+    transition: 'all 0.2s'
+  }
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function UIModule({ workflowState, setWorkflowState }) {
+export default function UIModule({ workflowState, setWorkflowState, onChangeModule }) {
   const [uiWorkflow, setUiWorkflow] = useState(() => {
     const saved = workflowState?.uiWorkflow
     if (!saved) return DEFAULT_WORKFLOW
@@ -271,7 +411,7 @@ export default function UIModule({ workflowState, setWorkflowState }) {
   const [providerWebConfig, setProviderWebConfig] = useState(DEFAULT_PROVIDER_WEB_CONFIG)
   const [providerWebConfigLoaded, setProviderWebConfigLoaded] = useState(() => !window.api?.configGet)
   const [providerSessionState, setProviderSessionState] = useState(DEFAULT_PROVIDER_SESSION_STATE)
-  const [rightTab, setRightTab] = useState('props') // 'props' | 'prompt' | 'session'
+  const [rightTab, setRightTab] = useState('props') // 'props' | 'prompt'
 
   useEffect(() => {
     if (!setWorkflowState) return
@@ -294,11 +434,6 @@ export default function UIModule({ workflowState, setWorkflowState }) {
     }).catch(() => { if (active) setProviderWebConfigLoaded(true) })
     return () => { active = false }
   }, [])
-
-  useEffect(() => {
-    if (!providerWebConfigLoaded || !window.api?.configSet) return
-    window.api.configSet('uiProviderWebConfig', providerWebConfig)
-  }, [providerWebConfig, providerWebConfigLoaded])
 
   const activeInstance = useMemo(
     () => uiWorkflow.instances.find((i) => i.id === uiWorkflow.activeInstanceId) || null,
@@ -363,13 +498,6 @@ export default function UIModule({ workflowState, setWorkflowState }) {
     return () => window.clearTimeout(t)
   }, [providerWebConfigLoaded, refreshProviderStatus])
 
-  const openProviderLogin = useCallback(async (pid) => {
-    const options = getProviderWebOptions(pid)
-    const result = pid === 'manus' ? await window.api.manusWebOpenLogin(options) : await window.api.chatgptWebOpenLogin(options)
-    if (!result?.success) { setNotice(result?.error || 'Could not open provider login.'); return }
-    setNotice(pid === 'manus' ? 'Opened Manus login.' : 'Opened ChatGPT login.')
-  }, [getProviderWebOptions])
-
   const openProviderWorkspace = useCallback(async (pid) => {
     const options = getProviderWebOptions(pid)
     const result = pid === 'manus' ? await window.api.manusWebOpenWorkspace(options) : await window.api.chatgptWebOpenWorkspace(options)
@@ -406,37 +534,66 @@ export default function UIModule({ workflowState, setWorkflowState }) {
     setNotice(`Image prompt for ${inst.name} copied — workspace opened.`)
   }, [copyPrompt, openProviderWorkspace, uiWorkflow])
 
-  const currentProviderStatus = providerSessionState[uiWorkflow.provider] || DEFAULT_PROVIDER_SESSION_STATE.manus
-  const providerStatusLabel = currentProviderStatus.loading ? 'Checking...' : currentProviderStatus.connected ? 'Connected' : currentProviderStatus.loginDetected ? 'Login required' : currentProviderStatus.checked ? 'Not connected' : 'Not checked'
-
   return (
     <div style={S.page}>
       {/* ── Header ── */}
       <div style={S.header}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
           <div>
-            <h1 style={S.title}>UI Studio</h1>
-            <p style={{ fontSize: 11, color: '#555b6e', margin: 0 }}>Place Roblox UI instances on the canvas, then generate.</p>
+            <h1 style={S.title} className="flex items-center gap-2">
+              <Compass size={18} className="text-rose-400" /> UI Studio
+            </h1>
+            <p style={{ fontSize: 11, color: '#94a3b8', margin: 0, marginTop: 4, fontWeight: 500 }}>
+              Place Roblox UI instances on the canvas, then generate.
+            </p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              style={S.btn}
+              onClick={() => onChangeModule?.('settings')}
+            >
+              <Settings size={13} /> Settings
+            </button>
             {Object.entries(PROVIDERS).map(([id, prov]) => {
               const active = uiWorkflow.provider === id
               const status = providerSessionState[id]
+              
+              let activeBorder = '1px solid rgba(255,255,255,0.08)'
+              let activeColor = '#94a3b8'
+              let activeBg = 'rgba(255,255,255,0.04)'
+              if (active) {
+                if (id === 'manus') {
+                  activeBorder = '1px solid rgba(56,189,248,0.4)'
+                  activeColor = '#38bdf8'
+                  activeBg = 'rgba(56,189,248,0.1)'
+                } else if (id === 'chatgpt-image') {
+                  activeBorder = '1px solid rgba(52,211,153,0.4)'
+                  activeColor = '#34d399'
+                  activeBg = 'rgba(52,211,153,0.1)'
+                }
+              }
+
               return (
-                <button key={id} onClick={() => updateWorkflow({ provider: id })} style={{ ...S.btn, border: active ? `1px solid ${prov.accent}` : '1px solid #2a3040', color: active ? prov.accent : '#c4cad8', position: 'relative' }}>
+                <button 
+                  key={id} 
+                  onClick={() => updateWorkflow({ provider: id })} 
+                  style={{ ...S.btn, border: activeBorder, color: activeColor, background: activeBg, position: 'relative' }}
+                >
+                  {id === 'manus' && <Compass size={13} className={active ? 'text-sky-400' : 'text-slate-500'} />}
+                  {id === 'chatgpt-image' && <Sparkle size={13} className={active ? 'text-emerald-400' : 'text-slate-500'} />}
                   {prov.label}
                   {status?.connected && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80', position: 'absolute', top: 4, right: 4 }} />}
                 </button>
               )
             })}
             <button style={S.primaryBtn} onClick={generate} disabled={busy === 'gen'}>
-              {busy === 'gen' ? 'Opening…' : selectedProvider.generateLabel}
+              <Sparkles size={13} /> {busy === 'gen' ? 'Opening…' : selectedProvider.generateLabel}
             </button>
           </div>
         </div>
         {notice && (
-          <div style={{ marginBottom: 10, padding: '7px 12px', borderRadius: 8, background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.18)', color: '#c4b5fd', fontSize: 11 }}>
-            {notice}
+          <div style={{ marginBottom: 10, padding: '10px 14px', borderRadius: 8, background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.18)', color: '#c4b5fd', fontSize: 11 }} className="flex items-center gap-1.5 animate-fadeIn">
+            <Sparkles size={13} /> <span>{notice}</span>
           </div>
         )}
       </div>
@@ -469,10 +626,10 @@ export default function UIModule({ workflowState, setWorkflowState }) {
           />
         </div>
 
-        {/* Right panel: props / prompt / session */}
+        {/* Right panel: props / prompt */}
         <div style={S.side}>
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-            {[['props','Properties'], ['prompt','Prompt'], ['session','Session']].map(([id, label]) => (
+            {[['props','Properties'], ['prompt','Prompt']].map(([id, label]) => (
               <button key={id} onClick={() => setRightTab(id)} style={{ ...S.btn, flex: 1, fontSize: 10, padding: '5px 6px', border: rightTab === id ? '1px solid #7c3aed' : '1px solid #2a3040', color: rightTab === id ? '#c4b5fd' : '#c4cad8' }}>{label}</button>
             ))}
           </div>
@@ -515,28 +672,6 @@ export default function UIModule({ workflowState, setWorkflowState }) {
                 <label style={S.label}>Generated Prompt</label>
                 <textarea readOnly rows={14} style={{ ...S.textarea, color: '#d5d9e5' }} value={promptState.prompt || 'Add instances to build a prompt.'} />
                 <button style={{ ...S.btn, width: '100%', marginTop: 8 }} onClick={() => copyPrompt(promptState.prompt)}>Copy Prompt</button>
-              </div>
-            </div>
-          )}
-
-          {rightTab === 'session' && (
-            <div>
-              <div style={S.card}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontSize: 10, color: '#7c8499', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Browser session</div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: selectedProvider.accent, marginTop: 6 }}>{selectedProvider.label}</div>
-                  </div>
-                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: currentProviderStatus.connected ? '#4ade80' : currentProviderStatus.loginDetected ? '#f59e0b' : '#94a3b8' }}>{providerStatusLabel}</span>
-                </div>
-                {currentProviderStatus.error && (
-                  <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 8, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.18)', color: '#fca5a5', fontSize: 11 }}>{currentProviderStatus.error}</div>
-                )}
-                <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
-                  <button style={S.btn} onClick={() => openProviderLogin(uiWorkflow.provider)}>Connect</button>
-                  <button style={S.btn} onClick={() => openProviderWorkspace(uiWorkflow.provider)}>Workspace</button>
-                  <button style={S.btn} onClick={() => refreshProviderStatus(uiWorkflow.provider)}>Refresh</button>
-                </div>
               </div>
             </div>
           )}
