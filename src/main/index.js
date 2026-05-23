@@ -1,13 +1,27 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, session } from 'electron'
-import { join } from 'path'
+import { app, shell, BrowserWindow, ipcMain, dialog, session, clipboard } from 'electron'
+import { basename, extname, join } from 'path'
 import { spawn } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  copyFileSync,
+  readdirSync,
+  statSync
+} from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
 let mainWindow = null
 const TRIPO_WEB_PARTITION = 'persist:tripo-web'
 const DEFAULT_TRIPO_WEB_BASE_URL = 'https://www.tripo3d.ai/'
 const DEFAULT_TRIPO_WEB_GENERATE_URL = 'https://www.tripo3d.ai/'
+const MANUS_WEB_PARTITION = 'persist:manus-web'
+const DEFAULT_MANUS_WEB_LOGIN_URL = 'https://manus.im/'
+const DEFAULT_MANUS_WEB_WORKSPACE_URL = 'https://manus.im/'
+const CHATGPT_WEB_PARTITION = 'persist:chatgpt-web'
+const DEFAULT_CHATGPT_WEB_LOGIN_URL = 'https://chatgpt.com/auth/login'
+const DEFAULT_CHATGPT_WEB_WORKSPACE_URL = 'https://chatgpt.com/'
 
 function getPythonDir() {
   if (is.dev) return join(process.cwd(), 'python')
@@ -33,6 +47,143 @@ function spawnPython(scriptName, args, onData, onError) {
       if (code === 0) resolve(stdout.trim())
       else reject(new Error(stderr || `Python exited with code ${code}`))
     })
+  })
+}
+
+function getWorkspaceModelDir() {
+  return join(app.getPath('temp'), 'ai-game-dev-hub')
+}
+
+function getPersistentModelLibraryDir() {
+  return join(app.getPath('userData'), 'generated-models')
+}
+
+function ensureDir(dirPath) {
+  if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true })
+}
+
+function sanitizeFileStem(value) {
+  const cleaned = Array.from(String(value || 'generated-model').trim())
+    .map((char) => {
+      const code = char.charCodeAt(0)
+      if (code < 32 || '<>:"/\\|?*'.includes(char)) return '_'
+      return char
+    })
+    .join('')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+
+  return cleaned || 'generated-model'
+}
+
+function getMimeTypeFromExt(filePath) {
+  const ext = extname(String(filePath || '')).toLowerCase()
+  if (ext === '.png') return 'image/png'
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg'
+  if (ext === '.webp') return 'image/webp'
+  if (ext === '.gif') return 'image/gif'
+  if (ext === '.mp4') return 'video/mp4'
+  if (ext === '.mov') return 'video/quicktime'
+  if (ext === '.webm') return 'video/webm'
+  if (ext === '.glb') return 'model/gltf-binary'
+  if (ext === '.gltf') return 'model/gltf+json'
+  if (ext === '.json') return 'application/json'
+  if (ext === '.txt' || ext === '.ini' || ext === '.csv') return 'text/plain'
+  return 'application/octet-stream'
+}
+
+function inferModelProvider(name, fallback = 'workspace') {
+  const lower = String(name || '').toLowerCase()
+  if (lower.startsWith('tripo_')) return 'tripo-web'
+  if (lower.includes('tripo')) return 'tripo'
+  return fallback
+}
+
+function getModelMetadataPath(filePath) {
+  return `${filePath}.json`
+}
+
+function readModelMetadata(filePath) {
+  try {
+    const metaPath = getModelMetadataPath(filePath)
+    if (!existsSync(metaPath)) return null
+    return JSON.parse(readFileSync(metaPath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function buildGeneratedModelItem(filePath, metadata = null) {
+  const stats = statSync(filePath)
+  const fileName = basename(filePath)
+  const meta = metadata || readModelMetadata(filePath) || {}
+  return {
+    id: filePath,
+    name: meta.name || fileName,
+    prompt: meta.prompt || '',
+    filePath,
+    outputPath: filePath,
+    provider: meta.provider || inferModelProvider(fileName),
+    sourceTab: meta.sourceTab || null,
+    modifiedAt: stats.mtimeMs
+  }
+}
+
+function listGeneratedModelItemsInDir(dirPath) {
+  if (!existsSync(dirPath)) return []
+  return readdirSync(dirPath)
+    .map((name) => join(dirPath, name))
+    .filter((filePath) => {
+      const lower = filePath.toLowerCase()
+      return (
+        (lower.endsWith('.glb') || lower.endsWith('.gltf')) &&
+        statSync(filePath).isFile()
+      )
+    })
+    .map((filePath) => buildGeneratedModelItem(filePath))
+}
+
+function persistGeneratedModel({
+  sourcePath,
+  name = '',
+  prompt = '',
+  provider = 'workspace',
+  sourceTab = null
+}) {
+  if (!sourcePath || !existsSync(sourcePath)) {
+    throw new Error('Generated model file was not found.')
+  }
+
+  const libraryDir = getPersistentModelLibraryDir()
+  ensureDir(libraryDir)
+
+  const ext = extname(sourcePath) || '.glb'
+  const stem = sanitizeFileStem(name) || sanitizeFileStem(basename(sourcePath, ext)) || 'generated-model'
+  const destPath = join(libraryDir, `${Date.now()}_${stem}${ext}`)
+
+  copyFileSync(sourcePath, destPath)
+  writeFileSync(
+    getModelMetadataPath(destPath),
+    JSON.stringify(
+      {
+        name: name || basename(destPath, ext),
+        prompt,
+        provider,
+        sourceTab,
+        savedAt: Date.now()
+      },
+      null,
+      2
+    ),
+    'utf8'
+  )
+
+  return buildGeneratedModelItem(destPath, {
+    name: name || basename(destPath, ext),
+    prompt,
+    provider,
+    sourceTab
   })
 }
 
@@ -76,11 +227,16 @@ function normalizeExternalUrl(value, fallback) {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
 }
 
-function getTripoWebSession() {
-  return session.fromPartition(TRIPO_WEB_PARTITION)
+function getProviderWebSession(partition) {
+  return session.fromPartition(partition)
 }
 
-async function createTripoWebWindow({ url, show = true, title = 'Tripo Browser Session' }) {
+async function createProviderWebWindow({
+  partition,
+  url,
+  show = true,
+  title = 'Browser Session'
+}) {
   const win = new BrowserWindow({
     width: 1360,
     height: 900,
@@ -91,7 +247,7 @@ async function createTripoWebWindow({ url, show = true, title = 'Tripo Browser S
     title,
     backgroundColor: '#0a0a0a',
     webPreferences: {
-      partition: TRIPO_WEB_PARTITION,
+      partition,
       sandbox: true
     }
   })
@@ -105,9 +261,29 @@ async function createTripoWebWindow({ url, show = true, title = 'Tripo Browser S
   return win
 }
 
-async function inspectTripoWebSession(baseUrl, generateUrl) {
-  const sessionCookies = await getTripoWebSession().cookies.get({})
-  const win = await createTripoWebWindow({ url: generateUrl || baseUrl, show: false, title: 'Tripo Session Check' })
+async function createTripoWebWindow({ url, show = true, title = 'Tripo Browser Session' }) {
+  return createProviderWebWindow({
+    partition: TRIPO_WEB_PARTITION,
+    url,
+    show,
+    title
+  })
+}
+
+async function inspectProviderWebSession({
+  partition,
+  loginUrl,
+  workspaceUrl,
+  title,
+  readyPattern
+}) {
+  const sessionCookies = await getProviderWebSession(partition).cookies.get({})
+  const win = await createProviderWebWindow({
+    partition,
+    url: workspaceUrl || loginUrl,
+    show: false,
+    title
+  })
 
   try {
     await wait(2500)
@@ -119,19 +295,20 @@ async function inspectTripoWebSession(baseUrl, generateUrl) {
           const rect = el.getBoundingClientRect()
           return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
         }
-        const candidates = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],input[type="text"],input:not([type])'))
-          .filter(visible)
+        const promptCandidates = Array.from(
+          document.querySelectorAll('textarea,[contenteditable="true"],input[type="text"],input:not([type])')
+        ).filter(visible)
         const buttonTexts = Array.from(document.querySelectorAll('button,a,[role="button"]'))
           .filter(visible)
           .map((el) => (el.innerText || el.textContent || '').trim())
           .filter(Boolean)
-          .slice(0, 20)
-        const bodyText = (document.body?.innerText || '').slice(0, 1500)
+          .slice(0, 40)
+        const bodyText = (document.body?.innerText || '').slice(0, 2000)
         const passwordInputs = document.querySelectorAll('input[type="password"]').length
         return {
           href: location.href,
           title: document.title,
-          promptCandidates: candidates.length,
+          promptCandidates: promptCandidates.length,
           passwordInputs,
           buttonTexts,
           bodyText
@@ -141,11 +318,14 @@ async function inspectTripoWebSession(baseUrl, generateUrl) {
 
     const loginDetected =
       snapshot.passwordInputs > 0 ||
-      /log in|sign in|continue with google|continue with discord/i.test(snapshot.bodyText)
+      /log in|login|sign in|continue with google|continue with microsoft|continue with apple/i.test(
+        snapshot.bodyText
+      )
+
     const connected =
       !loginDetected &&
       (snapshot.promptCandidates > 0 ||
-        snapshot.buttonTexts.some((text) => /generate|create|text to 3d|new project/i.test(text)))
+        snapshot.buttonTexts.some((text) => readyPattern.test(text)))
 
     return {
       success: true,
@@ -159,6 +339,16 @@ async function inspectTripoWebSession(baseUrl, generateUrl) {
   } finally {
     win.destroy()
   }
+}
+
+async function inspectTripoWebSession(baseUrl, generateUrl) {
+  return inspectProviderWebSession({
+    partition: TRIPO_WEB_PARTITION,
+    loginUrl: baseUrl,
+    workspaceUrl: generateUrl || baseUrl,
+    title: 'Tripo Session Check',
+    readyPattern: /generate|create|text to 3d|new project/i
+  })
 }
 
 async function navigateToTripoGenerateSurface(win, baseUrl, generateUrl) {
@@ -232,6 +422,246 @@ async function navigateToTripoGenerateSurface(win, baseUrl, generateUrl) {
   }
 
   return { success: false, error: 'Could not find Tripo generation UI. Update the generation URL in settings and reconnect your browser session.' }
+}
+
+function getTripoHistoryUrlCandidates(baseUrl, generateUrl) {
+  const normalizedBaseUrl = normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL).replace(/\/$/, '')
+  return Array.from(
+    new Set([
+      `${normalizedBaseUrl}/history`,
+      `${normalizedBaseUrl}/app/history`,
+      `${normalizedBaseUrl}/my-creations`,
+      `${normalizedBaseUrl}/my-creation`,
+      `${normalizedBaseUrl}/assets`,
+      `${normalizedBaseUrl}/models`,
+      `${normalizedBaseUrl}/library`,
+      `${normalizedBaseUrl}/app/assets`,
+      `${normalizedBaseUrl}/app/models`,
+      normalizeExternalUrl(generateUrl, DEFAULT_TRIPO_WEB_GENERATE_URL),
+      `${normalizedBaseUrl}/app`,
+      normalizedBaseUrl
+    ])
+  )
+}
+
+async function scrapeTripoHistoryItems(win) {
+  return win.webContents.executeJavaScript(`
+    (() => {
+      const visible = (el) => {
+        if (!el) return false
+        const style = window.getComputedStyle(el)
+        const rect = el.getBoundingClientRect()
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
+      }
+
+      const textOf = (el) => (el?.innerText || el?.textContent || '').replace(/\\s+/g, ' ').trim()
+      const absolute = (value) => {
+        if (!value) return ''
+        try {
+          return new URL(value, location.href).href
+        } catch {
+          return ''
+        }
+      }
+
+      const items = []
+      const seen = new Set()
+
+      const collect = (sourceEl) => {
+        if (!sourceEl) return
+        const card =
+          sourceEl.closest('article,li,[role="listitem"],a[href],button,[role="button"],div,section') ||
+          sourceEl
+        if (!card || !visible(card)) return
+
+        const previewImage = Array.from(card.querySelectorAll('img')).find(visible)
+        const anchor = card.matches('a[href]') ? card : card.querySelector('a[href]')
+        const buttons = Array.from(card.querySelectorAll('button,a,[role="button"]')).filter(visible)
+        const actionTexts = buttons.map(textOf).filter(Boolean).slice(0, 8)
+        const titleNode = card.querySelector(
+          'h1,h2,h3,h4,[class*="title"],[data-testid*="title"],[data-title]'
+        )
+        const cardText = textOf(card)
+        const lines = cardText
+          .split(/\\n+/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+        const title =
+          textOf(titleNode) ||
+          previewImage?.alt ||
+          lines.find((line) => line.length > 2 && line.length < 120) ||
+          ''
+        const prompt =
+          lines.find((line) => line !== title && line.length > 8 && line.length < 240) || ''
+        const detailUrl = absolute(anchor?.href || card.getAttribute('data-href') || '')
+        const downloadUrl =
+          Array.from(card.querySelectorAll('a[href]'))
+            .map((link) => absolute(link.href))
+            .find((href) => /\\.(glb|gltf)(\\?|$)/i.test(href)) || ''
+        const key = detailUrl || downloadUrl || [title, prompt, previewImage?.src || ''].join('|')
+
+        if (!key || seen.has(key)) return
+        if (!title && !previewImage) return
+        if (
+          !detailUrl &&
+          !downloadUrl &&
+          !actionTexts.some((text) => /open|view|detail|download|export|history|model/i.test(text))
+        ) {
+          return
+        }
+
+        seen.add(key)
+        items.push({
+          id: key,
+          name: title || 'Untitled Tripo Asset',
+          prompt,
+          previewUrl: previewImage?.src || '',
+          detailUrl,
+          downloadUrl,
+          actionTexts
+        })
+      }
+
+      Array.from(document.querySelectorAll('img')).filter(visible).forEach(collect)
+
+      Array.from(document.querySelectorAll('a[href],button,[role="button"]'))
+        .filter(visible)
+        .forEach((el) => {
+          if (/history|asset|model|creation|open|view|detail|download|export/i.test(textOf(el))) {
+            collect(el)
+          }
+        })
+
+      return {
+        url: location.href,
+        title: document.title,
+        items: items.slice(0, 80)
+      }
+    })()
+  `)
+}
+
+async function clickTripoHistoryNavigation(win) {
+  return win.webContents.executeJavaScript(`
+    (() => {
+      const visible = (el) => {
+        if (!el) return false
+        const style = window.getComputedStyle(el)
+        const rect = el.getBoundingClientRect()
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
+      }
+
+      const textOf = (el) => (el?.innerText || el?.textContent || '').replace(/\\s+/g, ' ').trim()
+      const target = Array.from(document.querySelectorAll('a[href],button,[role="button"]'))
+        .filter(visible)
+        .find((el) => {
+          const text = textOf(el)
+          return /history|my creations?|creations?|assets?|library|models?/i.test(text) &&
+            !/download|export|import/i.test(text)
+        })
+
+      if (!target) return { clicked: false }
+      target.click()
+      return { clicked: true, text: textOf(target) }
+    })()
+  `)
+}
+
+async function listTripoHistoryItems(baseUrl, generateUrl) {
+  const status = await inspectTripoWebSession(baseUrl, generateUrl)
+  if (!status.connected) {
+    return {
+      success: false,
+      error:
+        'No active Tripo website session was detected. Connect your account and make sure the session is ready first.'
+    }
+  }
+
+  let win = null
+  try {
+    const candidates = getTripoHistoryUrlCandidates(baseUrl, generateUrl)
+    win = await createTripoWebWindow({
+      url: candidates[0],
+      show: false,
+      title: 'Tripo History Sync'
+    })
+
+    for (const url of candidates) {
+      await win.loadURL(url)
+      await wait(2500)
+
+      for (let pass = 0; pass < 3; pass++) {
+        const scraped = await scrapeTripoHistoryItems(win)
+        if (scraped.items?.length) {
+          return { success: true, items: scraped.items, sourceUrl: scraped.url, title: scraped.title }
+        }
+
+        const nav = await clickTripoHistoryNavigation(win)
+        if (!nav.clicked) break
+        await wait(2500)
+      }
+    }
+
+    return {
+      success: false,
+      error:
+        'Could not find any assets in Tripo History. Open your history/library page once in the browser session and try syncing again.'
+    }
+  } finally {
+    if (win) win.destroy()
+  }
+}
+
+async function importTripoHistoryItem({ detailUrl, downloadUrl, name = '', prompt = '', sourceTab = null }) {
+  const outDir = getWorkspaceModelDir()
+  ensureDir(outDir)
+
+  let win = null
+  try {
+    const targetUrl = downloadUrl || detailUrl
+    if (!targetUrl) {
+      return { success: false, error: 'History item is missing a Tripo URL to import from.' }
+    }
+
+    win = await createTripoWebWindow({
+      url: targetUrl,
+      show: false,
+      title: 'Tripo History Import'
+    })
+
+    const downloadPromise = captureTripoWebDownload(win, outDir)
+
+    if (downloadUrl && /\.(glb|gltf)(\?|$)/i.test(downloadUrl)) {
+      win.webContents.downloadURL(downloadUrl)
+    } else {
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const action = await triggerTripoWebDownload(win)
+        if (action.action === 'downloadURL' && action.url) {
+          win.webContents.downloadURL(action.url)
+          break
+        }
+        if (action.action === 'clicked') {
+          await wait(1500)
+        } else {
+          await wait(2000)
+        }
+      }
+    }
+
+    const tempOutputPath = await downloadPromise
+    const item = persistGeneratedModel({
+      sourcePath: tempOutputPath,
+      name,
+      prompt,
+      provider: 'tripo-history',
+      sourceTab
+    })
+    return { success: true, item }
+  } catch (err) {
+    return { success: false, error: err.message || 'Could not import the selected Tripo history asset.' }
+  } finally {
+    if (win) win.destroy()
+  }
 }
 
 async function submitTripoWebPrompt(win, prompt) {
@@ -350,6 +780,40 @@ ipcMain.handle('dialog:openVideo', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
+ipcMain.handle('dialog:openVfxAssetFiles', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select VFX Reference Files',
+    filters: [
+      {
+        name: 'VFX References',
+        extensions: [
+          'png',
+          'jpg',
+          'jpeg',
+          'webp',
+          'gif',
+          'tga',
+          'mp4',
+          'mov',
+          'avi',
+          'mkv',
+          'webm',
+          'json',
+          'txt',
+          'csv',
+          'ini',
+          'uasset',
+          'uexp',
+          'ubulk'
+        ]
+      },
+      { name: 'All Files', extensions: ['*'] }
+    ],
+    properties: ['openFile', 'multiSelections']
+  })
+  return result.canceled ? [] : result.filePaths
+})
+
 ipcMain.handle('dialog:saveFile', async (_, opts) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     title: opts.title || 'Save File',
@@ -371,33 +835,78 @@ ipcMain.handle('fs:readTextFile', async (_, { filePath }) => {
 })
 
 // ── IPC: Animation — Text to Motion ──────────────────────────────────────
-// Backends (in priority order):
-//   1. hymotion-local  → user's local HY-Motion Gradio app (localhost:7860)
-//   2. hymotion-comfy  → ComfyUI-HY-Motion1 plugin (localhost:8188)
-//   3. hymotion-hf     → tencent/HY-Motion-1.0 HuggingFace Space (cloud)
-//   4. momask          → MeYourHint/MoMask HF Space (fallback)
-//   5. mdm             → EricGuo5513/MDM-Text-to-Motion HF Space (fallback)
+// Uses Tencent's HY-Motion hosted Gradio app and expects a BVH result.
 
-async function downloadFile(url, destPath) {
-  const https = await import('https')
-  const http = await import('http')
-  const { createWriteStream } = await import('fs')
-  return new Promise((resolve, reject) => {
-    const protocol = url.startsWith('https') ? https.default || https : http.default || http
-    const file = createWriteStream(destPath)
-    protocol
-      .get(url, (res) => {
-        res.pipe(file)
-        file.on('finish', () => {
-          file.close()
-          resolve()
-        })
-      })
-      .on('error', (e) => {
-        file.close()
-        reject(e)
-      })
+async function downloadFile(url, destPath, headers = {}) {
+  const response = await fetch(url, { headers })
+  if (!response.ok) {
+    throw new Error(`Download failed (${response.status})`)
+  }
+  const data = Buffer.from(await response.arrayBuffer())
+  writeFileSync(destPath, data)
+}
+
+function getMimeTypeForPath(filePath) {
+  const ext = String(filePath || '')
+    .split('.')
+    .pop()
+    ?.toLowerCase()
+  return (
+    {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      webp: 'image/webp'
+    }[ext] || 'application/octet-stream'
+  )
+}
+
+function filePathToDataUrl(filePath) {
+  const data = readFileSync(filePath)
+  return `data:${getMimeTypeForPath(filePath)};base64,${data.toString('base64')}`
+}
+
+const REPLICATE_BASE = 'https://api.replicate.com/v1'
+
+async function replicateRequest(path, { apiToken, method = 'GET', body, wait } = {}) {
+  const response = await fetch(`${REPLICATE_BASE}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(wait ? { Prefer: `wait=${wait}` } : {})
+    },
+    ...(body ? { body: JSON.stringify(body) } : {})
   })
+
+  const raw = await response.text()
+  let parsed = null
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      parsed = { detail: raw }
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(parsed?.detail || parsed?.error || `Replicate request failed (${response.status})`)
+  }
+
+  return parsed
+}
+
+function extractReplicateOutputUrl(output) {
+  if (!output) return null
+  if (typeof output === 'string') return output
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      if (typeof item === 'string') return item
+      if (item?.url) return item.url
+    }
+  }
+  if (output?.url) return output.url
+  return null
 }
 
 function listMotionFormats(data) {
@@ -435,6 +944,14 @@ function extractMotionFile(data, exts = ['.bvh', '.glb', '.fbx', '.npz']) {
   return null
 }
 
+function normalizeTextToMotionError(err) {
+  const message = err?.message || 'Unknown text-to-motion error.'
+  if (/Could not resolve app config/i.test(message)) {
+    return 'Could not connect to HY-Motion right now. The hosted motion service did not return a valid app config.'
+  }
+  return message
+}
+
 ipcMain.handle('animation:textToMotion', async (event, { prompt, model, duration }) => {
   const send = (step, pct) => event.sender.send('animation:progress', { step, pct })
   try {
@@ -443,7 +960,7 @@ ipcMain.handle('animation:textToMotion', async (event, { prompt, model, duration
 
     const { Client } = await import('@gradio/client')
 
-    send('Connecting to HY-Motion HuggingFace Space...', 10)
+    send('Connecting to HY-Motion...', 10)
     const client = await Client.connect('tencent/HY-Motion-1.0', { hf_token: undefined })
 
     send('Generating motion with HY-Motion 1.0...', 30)
@@ -475,7 +992,7 @@ ipcMain.handle('animation:textToMotion', async (event, { prompt, model, duration
     send('Done!', 100)
     return { success: true, bvhPath: outPath, format: found.ext.slice(1) }
   } catch (err) {
-    return { success: false, error: err.message }
+    return { success: false, error: normalizeTextToMotionError(err) }
   }
 })
 
@@ -550,6 +1067,27 @@ ipcMain.handle('shell:openPath', async (_, filePath) => {
   shell.showItemInFolder(filePath)
 })
 
+ipcMain.handle('shell:openExternalUrl', async (_, url) => {
+  try {
+    if (!url || !/^https?:\/\//i.test(String(url))) {
+      return { success: false, error: 'A valid external URL is required.' }
+    }
+    await shell.openExternal(String(url))
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('clipboard:writeText', async (_, text) => {
+  try {
+    clipboard.writeText(String(text ?? ''))
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
 ipcMain.handle('fs:copyFile', async (_, { src, dest }) => {
   try {
     const { copyFileSync } = await import('fs')
@@ -566,15 +1104,68 @@ ipcMain.handle('fs:readFileAsDataURL', async (_, { filePath }) => {
   try {
     const { readFileSync } = await import('fs')
     const buf = readFileSync(filePath)
-    const ext = filePath.split('.').pop().toLowerCase()
-    const mime =
-      ext === 'glb'
-        ? 'model/gltf-binary'
-        : ext === 'gltf'
-          ? 'model/gltf+json'
-          : 'application/octet-stream'
+    const mime = getMimeTypeFromExt(filePath)
     const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
     return { success: true, dataUrl }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('fs:writeTextFile', async (_, { filePath, text }) => {
+  try {
+    writeFileSync(filePath, String(text ?? ''), 'utf8')
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('vfx:exportPackage', async (_, payload) => {
+  try {
+    const folderPath = payload?.folderPath
+    if (!folderPath) {
+      throw new Error('A destination folder is required to export the VFX package.')
+    }
+
+    ensureDir(folderPath)
+
+    const stem = sanitizeFileStem(payload?.effectName || 'roblox-vfx')
+    const presetPath = join(folderPath, `${stem}.preset.json`)
+    const luaPath = join(folderPath, `${stem}.module.lua`)
+    const workflowPath = join(folderPath, `${stem}.workflow.txt`)
+
+    writeFileSync(presetPath, JSON.stringify(payload?.preset ?? {}, null, 2), 'utf8')
+    writeFileSync(luaPath, String(payload?.luaScript ?? ''), 'utf8')
+    writeFileSync(workflowPath, String(payload?.workflowText ?? ''), 'utf8')
+
+    return {
+      success: true,
+      folderPath,
+      files: { presetPath, luaPath, workflowPath }
+    }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('modeling:listGeneratedModels', async () => {
+  try {
+    const items = [
+      ...listGeneratedModelItemsInDir(getPersistentModelLibraryDir()),
+      ...listGeneratedModelItemsInDir(getWorkspaceModelDir())
+    ]
+      .sort((a, b) => b.modifiedAt - a.modifiedAt)
+
+    return { success: true, items }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('modeling:saveGeneratedModel', async (_, payload) => {
+  try {
+    return { success: true, item: persistGeneratedModel(payload || {}) }
   } catch (err) {
     return { success: false, error: err.message }
   }
@@ -610,69 +1201,6 @@ ipcMain.handle('dialog:openImage', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
-// ── IPC: Modeling — Generate 3D Model (Gradio HF Space) ───────────────────
-
-ipcMain.handle('modeling:generate', async (event, { prompt, imagePath, mode }) => {
-  try {
-    event.sender.send('modeling:progress', { step: 'Connecting to HuggingFace Space...', pct: 10 })
-
-    const { Client } = await import('@gradio/client')
-
-    let client, result
-
-    if (mode === 'image' && imagePath) {
-      // TripoSR: image → 3D
-      event.sender.send('modeling:progress', { step: 'Running TripoSR (image → 3D)...', pct: 25 })
-      client = await Client.connect('stabilityai/TripoSR')
-      const imageBlob = await (await import('fs')).promises.readFile(imagePath)
-      result = await client.predict('/generate', { image: new Blob([imageBlob]) })
-    } else {
-      // Shap-E: text → 3D
-      event.sender.send('modeling:progress', { step: 'Running Shap-E (text → 3D)...', pct: 25 })
-      client = await Client.connect('hysts/Shap-E')
-      result = await client.predict('/generate-3d', { prompt })
-    }
-
-    event.sender.send('modeling:progress', { step: 'Processing 3D output...', pct: 80 })
-
-    const outputData = result?.data
-    // Save output file to temp dir
-    const outDir = join(app.getPath('temp'), 'ai-game-dev-hub')
-    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
-
-    let outputPath = null
-    // HF Spaces typically return a file URL or blob
-    if (outputData && outputData[0]) {
-      const item = outputData[0]
-      if (item?.url) {
-        // Download file from URL
-        const https = await import('https')
-        const http = await import('http')
-        const { createWriteStream } = await import('fs')
-        const ext = item.url.includes('.glb') ? 'glb' : item.url.includes('.obj') ? 'obj' : 'glb'
-        outputPath = join(outDir, `model_${Date.now()}.${ext}`)
-        await new Promise((resolve, reject) => {
-          const protocol = item.url.startsWith('https') ? https : http
-          const file = createWriteStream(outputPath)
-          protocol
-            .get(item.url, (res) => {
-              res.pipe(file)
-              file.on('finish', resolve)
-            })
-            .on('error', reject)
-        })
-      } else if (item?.path) {
-        outputPath = item.path
-      }
-    }
-
-    event.sender.send('modeling:progress', { step: 'Model ready!', pct: 100 })
-    return { success: true, outputPath, type: mode === 'image' ? 'triposr' : 'shape' }
-  } catch (err) {
-    return { success: false, error: err.message }
-  }
-})
-
 // ── IPC: Config (API keys stored in userData) ─────────────────────────────
 
 function getConfigPath() {
@@ -696,6 +1224,111 @@ ipcMain.handle('config:set', (_, key, value) => {
   saveConfig(cfg)
   return true
 })
+
+ipcMain.handle(
+  'replicate:generateClothing',
+  async (
+    event,
+    {
+      apiToken,
+      prompt,
+      inputImagePath,
+      inputImageDataUrl,
+      model = 'black-forest-labs/flux-kontext-pro',
+      seed = null
+    } = {}
+  ) => {
+    try {
+      if (!apiToken?.trim()) {
+        return { success: false, error: 'Replicate API token required.' }
+      }
+      if (!prompt?.trim()) {
+        return { success: false, error: 'A clothing prompt is required.' }
+      }
+      const resolvedInputImage =
+        inputImageDataUrl?.trim() || (inputImagePath?.trim() ? filePathToDataUrl(inputImagePath) : '')
+      if (!resolvedInputImage) {
+        return { success: false, error: 'Attach a Roblox clothing template image first.' }
+      }
+
+      const outDir = join(app.getPath('temp'), 'ai-game-dev-hub')
+      if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
+
+      event.sender.send('clothing:progress', { step: 'Uploading template to Replicate…', pct: 10 })
+
+      const input = {
+        prompt: prompt.trim(),
+        input_image: resolvedInputImage,
+        output_format: 'png',
+        prompt_upsampling: true,
+        safety_tolerance: 2
+      }
+
+      if (Number.isInteger(seed)) input.seed = seed
+
+      event.sender.send('clothing:progress', { step: 'Starting FLUX clothing edit…', pct: 20 })
+      let prediction = await replicateRequest(`/models/${model}/predictions`, {
+        apiToken: apiToken.trim(),
+        method: 'POST',
+        wait: 1,
+        body: {
+          input
+        }
+      })
+
+      if (!prediction?.id) {
+        return { success: false, error: 'Replicate did not return a prediction id.' }
+      }
+
+      let attempts = 0
+      while (attempts < 90) {
+        const status = prediction?.status
+        if (status === 'succeeded') {
+          const outputUrl = extractReplicateOutputUrl(prediction.output)
+          if (!outputUrl) {
+            return { success: false, error: 'Replicate finished without an image URL.' }
+          }
+
+          event.sender.send('clothing:progress', { step: 'Downloading generated texture…', pct: 94 })
+          const outputPath = join(outDir, `classic_clothing_${Date.now()}.png`)
+          await downloadFile(outputUrl, outputPath, {
+            Authorization: `Bearer ${apiToken.trim()}`
+          })
+          event.sender.send('clothing:progress', { step: 'Classic clothing texture ready!', pct: 100 })
+          return {
+            success: true,
+            outputPath,
+            provider: 'replicate',
+            predictionId: prediction.id,
+            model
+          }
+        }
+
+        if (status === 'failed' || status === 'canceled') {
+          return {
+            success: false,
+            error: prediction?.error || `Replicate prediction ${status}.`
+          }
+        }
+
+        attempts += 1
+        const pct = Math.min(90, 24 + attempts)
+        event.sender.send('clothing:progress', {
+          step: `Generating clothing texture… (${status || 'starting'})`,
+          pct
+        })
+        await wait(2000)
+        prediction = await replicateRequest(`/predictions/${prediction.id}`, {
+          apiToken: apiToken.trim()
+        })
+      }
+
+      return { success: false, error: 'Timed out waiting for Replicate output.' }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  }
+)
 
 // ── IPC: Tripo Website Session Wrapper ──────────────────────────────────────
 
@@ -725,6 +1358,119 @@ ipcMain.handle('tripo:webSessionStatus', async (_, { baseUrl, generateUrl } = {}
       normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL),
       normalizeExternalUrl(generateUrl, DEFAULT_TRIPO_WEB_GENERATE_URL)
     )
+  } catch (err) {
+    return { success: false, connected: false, error: err.message }
+  }
+})
+
+ipcMain.handle('tripo:webListHistory', async (_, { baseUrl, generateUrl } = {}) => {
+  try {
+    return await listTripoHistoryItems(
+      normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL),
+      normalizeExternalUrl(generateUrl, DEFAULT_TRIPO_WEB_GENERATE_URL)
+    )
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('tripo:webImportHistoryItem', async (_, payload = {}) => {
+  try {
+    return await importTripoHistoryItem(payload)
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('manus:webOpenLogin', async (_, { loginUrl } = {}) => {
+  try {
+    const url = normalizeExternalUrl(loginUrl, DEFAULT_MANUS_WEB_LOGIN_URL)
+    await createProviderWebWindow({
+      partition: MANUS_WEB_PARTITION,
+      url,
+      show: true,
+      title: 'Connect Manus Account'
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('manus:webOpenWorkspace', async (_, { workspaceUrl, loginUrl } = {}) => {
+  try {
+    const url = normalizeExternalUrl(
+      workspaceUrl,
+      normalizeExternalUrl(loginUrl, DEFAULT_MANUS_WEB_WORKSPACE_URL)
+    )
+    await createProviderWebWindow({
+      partition: MANUS_WEB_PARTITION,
+      url,
+      show: true,
+      title: 'Manus Workspace'
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('manus:webSessionStatus', async (_, { loginUrl, workspaceUrl } = {}) => {
+  try {
+    return await inspectProviderWebSession({
+      partition: MANUS_WEB_PARTITION,
+      loginUrl: normalizeExternalUrl(loginUrl, DEFAULT_MANUS_WEB_LOGIN_URL),
+      workspaceUrl: normalizeExternalUrl(workspaceUrl, DEFAULT_MANUS_WEB_WORKSPACE_URL),
+      title: 'Manus Session Check',
+      readyPattern: /new task|workspace|agent|chat|project|create/i
+    })
+  } catch (err) {
+    return { success: false, connected: false, error: err.message }
+  }
+})
+
+ipcMain.handle('chatgpt:webOpenLogin', async (_, { loginUrl } = {}) => {
+  try {
+    const url = normalizeExternalUrl(loginUrl, DEFAULT_CHATGPT_WEB_LOGIN_URL)
+    await createProviderWebWindow({
+      partition: CHATGPT_WEB_PARTITION,
+      url,
+      show: true,
+      title: 'Connect ChatGPT Account'
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('chatgpt:webOpenWorkspace', async (_, { workspaceUrl, loginUrl } = {}) => {
+  try {
+    const url = normalizeExternalUrl(
+      workspaceUrl,
+      normalizeExternalUrl(loginUrl, DEFAULT_CHATGPT_WEB_WORKSPACE_URL)
+    )
+    await createProviderWebWindow({
+      partition: CHATGPT_WEB_PARTITION,
+      url,
+      show: true,
+      title: 'ChatGPT Workspace'
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('chatgpt:webSessionStatus', async (_, { loginUrl, workspaceUrl } = {}) => {
+  try {
+    return await inspectProviderWebSession({
+      partition: CHATGPT_WEB_PARTITION,
+      loginUrl: normalizeExternalUrl(loginUrl, DEFAULT_CHATGPT_WEB_LOGIN_URL),
+      workspaceUrl: normalizeExternalUrl(workspaceUrl, DEFAULT_CHATGPT_WEB_WORKSPACE_URL),
+      title: 'ChatGPT Session Check',
+      readyPattern: /new chat|message|create image|image|temporary chat|explore gpts/i
+    })
   } catch (err) {
     return { success: false, connected: false, error: err.message }
   }
@@ -815,639 +1561,6 @@ ipcMain.handle(
       }
     } finally {
       if (win && !keepWindowOpen) win.destroy()
-    }
-  }
-)
-
-// ── IPC: Tripo3D API ─────────────────────────────────────────────────────
-
-const TRIPO_BASE = 'https://api.tripo3d.ai/v2/openapi'
-
-async function tripoRequest(method, path, body, apiKey) {
-  const https = await import('https')
-  const url = new URL(TRIPO_BASE + path)
-  const data = body ? JSON.stringify(body) : null
-  return new Promise((resolve, reject) => {
-    const req = https.default.request(
-      {
-        hostname: url.hostname,
-        path: url.pathname + url.search,
-        method,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {})
-        }
-      },
-      (res) => {
-        let raw = ''
-        res.on('data', (d) => (raw += d))
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(raw))
-          } catch {
-            reject(new Error('Invalid JSON: ' + raw.slice(0, 200)))
-          }
-        })
-      }
-    )
-    req.on('error', reject)
-    if (data) req.write(data)
-    req.end()
-  })
-}
-
-async function tripoUploadImage(imagePath, apiKey) {
-  const https = await import('https')
-  const path_ = await import('path')
-  const filename = path_.basename(imagePath)
-  const ext = filename.split('.').pop().toLowerCase()
-  const mime =
-    { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[ext] ||
-    'image/jpeg'
-
-  const boundary = `boundary${Date.now()}`
-  const fileData = readFileSync(imagePath)
-  const prefix = Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`
-  )
-  const suffix = Buffer.from(`\r\n--${boundary}--\r\n`)
-  const bodyBuf = Buffer.concat([prefix, fileData, suffix])
-
-  return new Promise((resolve, reject) => {
-    const req = https.default.request(
-      {
-        hostname: 'api.tripo3d.ai',
-        path: '/v2/openapi/upload',
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': bodyBuf.length
-        }
-      },
-      (res) => {
-        let raw = ''
-        res.on('data', (d) => (raw += d))
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(raw))
-          } catch {
-            reject(new Error(raw.slice(0, 200)))
-          }
-        })
-      }
-    )
-    req.on('error', reject)
-    req.write(bodyBuf)
-    req.end()
-  })
-}
-
-ipcMain.handle('tripo:getBalance', async (_, { apiKey }) => {
-  try {
-    const res = await tripoRequest('GET', '/user/balance', null, apiKey)
-    if (res.code === 0) return { success: true, balance: res.data.balance, frozen: res.data.frozen }
-    return { success: false, error: res.message || 'API error' }
-  } catch (e) {
-    return { success: false, error: e.message }
-  }
-})
-
-ipcMain.handle(
-  'tripo:generate',
-  async (
-    event,
-    {
-      apiKey,
-      type,
-      prompt,
-      imagePath,
-      texture = true,
-      pbr = true,
-      style = null,
-      smartLowPoly = false,
-      modelVersion = 'v2.5-20250123'
-    }
-  ) => {
-    try {
-      const outDir = join(app.getPath('temp'), 'ai-game-dev-hub')
-      if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
-
-      event.sender.send('modeling:progress', { step: 'Connecting to Tripo3D API...', pct: 8 })
-
-      const taskBody = {
-        model_version: modelVersion,
-        texture,
-        pbr,
-        smart_low_poly: smartLowPoly
-      }
-      if (style) taskBody.style = style
-
-      if (type === 'image' && imagePath) {
-        event.sender.send('modeling:progress', { step: 'Uploading reference image...', pct: 15 })
-        const uploadRes = await tripoUploadImage(imagePath, apiKey)
-        if (uploadRes.code !== 0)
-          return { success: false, error: uploadRes.message || 'Upload failed' }
-        taskBody.type = 'image_to_model'
-        taskBody.file = { type: 'jpg', file_token: uploadRes.data.image_token }
-      } else {
-        taskBody.type = 'text_to_model'
-        taskBody.prompt = prompt
-      }
-
-      event.sender.send('modeling:progress', { step: 'Creating generation task...', pct: 22 })
-      const createRes = await tripoRequest('POST', '/task', taskBody, apiKey)
-      if (createRes.code !== 0)
-        return { success: false, error: createRes.message || 'Task creation failed' }
-
-      const taskId = createRes.data.task_id
-      event.sender.send('modeling:progress', {
-        step: `Task queued (${taskId.slice(0, 8)}…)`,
-        pct: 28
-      })
-
-      // Poll until done
-      let attempts = 0
-      while (attempts < 150) {
-        await new Promise((r) => setTimeout(r, 2000))
-        attempts++
-        const taskRes = await tripoRequest('GET', `/task/${taskId}`, null, apiKey)
-        if (taskRes.code !== 0) continue
-
-        const { status, progress } = taskRes.data
-        const pct = 28 + Math.floor((progress || 0) * 0.65)
-        event.sender.send('modeling:progress', { step: `Generating 3D model… (${status})`, pct })
-
-        if (status === 'success') {
-          const modelUrl = taskRes.data.output?.model || taskRes.data.output?.pbr_model
-          if (!modelUrl) return { success: false, error: 'No model URL in response' }
-
-          event.sender.send('modeling:progress', { step: 'Downloading GLB model...', pct: 95 })
-          const outputPath = join(outDir, `tripo_${Date.now()}.glb`)
-          await downloadFile(modelUrl, outputPath)
-          event.sender.send('modeling:progress', { step: 'Model ready!', pct: 100 })
-          return { success: true, outputPath, taskId, provider: 'tripo' }
-        }
-
-        if (status === 'failed' || status === 'cancelled') {
-          return { success: false, error: `Task ${status}: ${taskRes.data.message || ''}` }
-        }
-      }
-      return { success: false, error: 'Timed out waiting for Tripo task' }
-    } catch (e) {
-      return { success: false, error: e.message }
-    }
-  }
-)
-
-// ── IPC: Tripo SDK (Python wrapper — mirrors ComfyUI-Tripo) ───────────────
-// Spawns python/tripo_gen.py which uses the official tripo3d pip SDK.
-// Authentication via TRIPO_API_KEY environment variable (set once, works everywhere).
-
-function spawnTripoScript(args, env = {}) {
-  return new Promise((resolve) => {
-    const scriptPath = join(getPythonDir(), 'tripo_gen.py')
-    const proc = spawn('python', [scriptPath, ...args], {
-      env: { ...process.env, ...env },
-      cwd: getPythonDir()
-    })
-    let lastResult = null
-    const progressEvents = []
-    proc.stderr.on('data', (d) => console.error('[tripo_gen]', d.toString().trim()))
-    proc.on('close', (code) => {
-      if (lastResult) resolve(lastResult)
-      else resolve({ success: false, error: `Script exited with code ${code}` })
-    })
-    proc.on('error', (e) => resolve({ success: false, error: e.message }))
-    return { proc, progressEvents }
-  })
-}
-
-// Streaming version — emits progress IPC events while running
-async function spawnTripoScriptStreaming(event, args, env = {}) {
-  return new Promise((resolve) => {
-    const scriptPath = join(getPythonDir(), 'tripo_gen.py')
-    const proc = spawn('python', [scriptPath, ...args], {
-      env: { ...process.env, ...env },
-      cwd: getPythonDir()
-    })
-
-    let lastResult = null
-
-    proc.stdout.on('data', (data) => {
-      const lines = data
-        .toString()
-        .split('\n')
-        .filter((l) => l.trim())
-      for (const line of lines) {
-        try {
-          const msg = JSON.parse(line)
-          if (msg.type === 'progress') {
-            event.sender.send('modeling:progress', { step: msg.step, pct: msg.pct })
-          } else if (msg.type === 'result') {
-            lastResult = msg
-          }
-        } catch {
-          // Ignore non-JSON log lines from the Python wrapper.
-        }
-      }
-    })
-    proc.stderr.on('data', (d) => console.error('[tripo_gen]', d.toString().trim()))
-    proc.on('close', (code) => {
-      if (lastResult) resolve(lastResult)
-      else resolve({ success: false, error: `tripo_gen.py exited ${code} — is TRIPO_API_KEY set?` })
-    })
-    proc.on('error', (e) => resolve({ success: false, error: 'Cannot start Python: ' + e.message }))
-  })
-}
-
-ipcMain.handle('tripo:sdkCheck', async (_, { apiKey } = {}) => {
-  const env = apiKey ? { TRIPO_API_KEY: apiKey } : {}
-  return spawnTripoScript(['--mode', 'check'], env)
-})
-
-ipcMain.handle('tripo:sdkBalance', async (_, { apiKey } = {}) => {
-  const env = apiKey ? { TRIPO_API_KEY: apiKey } : {}
-  return spawnTripoScript(['--mode', 'balance'], env)
-})
-
-ipcMain.handle(
-  'tripo:sdkGenerate',
-  async (
-    event,
-    {
-      mode = 'text',
-      prompt = '',
-      imagePath = '',
-      modelVersion = 'v2.5-20250123',
-      style = 'None',
-      texture = true,
-      pbr = true,
-      smartLowPoly = false,
-      faceLimit = -1,
-      apiKey = ''
-    }
-  ) => {
-    const outDir = join(app.getPath('temp'), 'ai-game-dev-hub')
-    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
-    const outPath = join(outDir, `tripo_sdk_${Date.now()}.glb`)
-
-    const args = [
-      '--mode',
-      mode,
-      '--output',
-      outPath,
-      '--model-version',
-      modelVersion,
-      '--style',
-      style || 'None',
-      ...(prompt ? ['--prompt', prompt] : []),
-      ...(imagePath ? ['--image', imagePath] : []),
-      ...(texture ? ['--texture'] : ['--no-texture']),
-      ...(pbr ? ['--pbr'] : ['--no-pbr']),
-      ...(smartLowPoly ? ['--smart-low-poly'] : []),
-      ...(faceLimit > 0 ? ['--face-limit', String(faceLimit)] : [])
-    ]
-    const env = apiKey ? { TRIPO_API_KEY: apiKey } : {}
-    return spawnTripoScriptStreaming(event, args, env)
-  }
-)
-
-// ── IPC: ComfyUI Wrapper ──────────────────────────────────────────────────
-// Connects to a locally-running ComfyUI instance with ComfyUI-Tripo nodes.
-// Node classes: TripoAPIDraft, TripoTextureModel, TripoAnimateRigNode, TripoAnimateRetargetNode
-
-async function comfyFetch(serverUrl, path, method = 'GET', body = null) {
-  const http = serverUrl.startsWith('https') ? await import('https') : await import('http')
-  const url = new URL(serverUrl + path)
-  const data = body ? JSON.stringify(body) : null
-  return new Promise((resolve, reject) => {
-    const req = http.default.request(
-      {
-        hostname: url.hostname,
-        port: url.port || (serverUrl.startsWith('https') ? 443 : 80),
-        path: url.pathname + url.search,
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {})
-        }
-      },
-      (res) => {
-        let raw = ''
-        res.on('data', (d) => (raw += d))
-        res.on('end', () => {
-          try {
-            resolve({ status: res.statusCode, body: JSON.parse(raw) })
-          } catch {
-            resolve({ status: res.statusCode, body: raw })
-          }
-        })
-      }
-    )
-    req.on('error', reject)
-    if (data) req.write(data)
-    req.end()
-  })
-}
-
-// Workflow builders — produce ComfyUI API-format prompt JSON
-function buildTripoTextWorkflow({
-  prompt,
-  apiKey,
-  modelVersion,
-  texture,
-  pbr,
-  smartLowPoly,
-  style,
-  seed
-}) {
-  return {
-    1: {
-      class_type: 'TripoAPIDraft',
-      inputs: {
-        mode: 'text_to_model',
-        apikey: apiKey || '',
-        prompt,
-        negative_prompt: '',
-        model_version: modelVersion || 'v2.5-20250123',
-        texture,
-        pbr,
-        smart_low_poly: smartLowPoly || false,
-        generate_parts: false,
-        auto_size: false,
-        face_limit: -1,
-        quad: false,
-        compress: false,
-        orientation: 'default',
-        ...(style && style !== 'None' ? { style } : {}),
-        image_seed: seed || 42,
-        model_seed: seed || 42,
-        texture_seed: seed || 42,
-        texture_quality: 'standard',
-        file_prefix: 'aigamedev_',
-        output_directory: ''
-      }
-    }
-  }
-}
-
-function buildTripoImageWorkflow({
-  imageName,
-  apiKey,
-  modelVersion,
-  texture,
-  pbr,
-  smartLowPoly,
-  style,
-  seed
-}) {
-  return {
-    1: {
-      class_type: 'LoadImage',
-      inputs: { image: imageName, upload: 'image' }
-    },
-    2: {
-      class_type: 'TripoAPIDraft',
-      inputs: {
-        mode: 'image_to_model',
-        apikey: apiKey || '',
-        image: ['1', 0], // linked from LoadImage output 0
-        negative_prompt: '',
-        model_version: modelVersion || 'v2.5-20250123',
-        texture,
-        pbr,
-        smart_low_poly: smartLowPoly || false,
-        generate_parts: false,
-        auto_size: false,
-        face_limit: -1,
-        quad: false,
-        compress: false,
-        orientation: 'default',
-        ...(style && style !== 'None' ? { style } : {}),
-        model_seed: seed || 42,
-        texture_seed: seed || 42,
-        texture_quality: 'standard',
-        texture_alignment: 'original_image',
-        file_prefix: 'aigamedev_',
-        output_directory: ''
-      }
-    }
-  }
-}
-
-// Upload image to ComfyUI's /upload/image endpoint
-async function comfyUploadImage(serverUrl, imagePath) {
-  const http = serverUrl.startsWith('https') ? await import('https') : await import('http')
-  const path_ = await import('path')
-  const filename = path_.basename(imagePath)
-  const ext = filename.split('.').pop().toLowerCase()
-  const mime =
-    { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[ext] ||
-    'image/jpeg'
-  const url = new URL(serverUrl + '/upload/image')
-  const boundary = `boundary${Date.now()}`
-  const fileData = readFileSync(imagePath)
-  const prefix = Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`
-  )
-  const suffix = Buffer.from(`\r\n--${boundary}--\r\n`)
-  const bodyBuf = Buffer.concat([prefix, fileData, suffix])
-  return new Promise((resolve, reject) => {
-    const req = http.default.request(
-      {
-        hostname: url.hostname,
-        port: url.port || 8188,
-        path: url.pathname,
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': bodyBuf.length
-        }
-      },
-      (res) => {
-        let raw = ''
-        res.on('data', (d) => (raw += d))
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(raw))
-          } catch {
-            reject(new Error(raw))
-          }
-        })
-      }
-    )
-    req.on('error', reject)
-    req.write(bodyBuf)
-    req.end()
-  })
-}
-
-ipcMain.handle('comfyui:ping', async (_, { serverUrl }) => {
-  try {
-    const res = await comfyFetch(serverUrl, '/system_stats')
-    if (res.status === 200) return { online: true, stats: res.body }
-    return { online: false }
-  } catch {
-    return { online: false }
-  }
-})
-
-ipcMain.handle('comfyui:checkNodes', async (_, { serverUrl }) => {
-  try {
-    const res = await comfyFetch(serverUrl, '/object_info/TripoAPIDraft')
-    if (res.status === 200 && res.body?.TripoAPIDraft) return { installed: true }
-    return {
-      installed: false,
-      error: 'TripoAPIDraft node not found. Install ComfyUI-Tripo custom nodes.'
-    }
-  } catch (e) {
-    return { installed: false, error: e.message }
-  }
-})
-
-ipcMain.handle(
-  'comfyui:generate',
-  async (
-    event,
-    {
-      serverUrl,
-      mode,
-      prompt,
-      imagePath,
-      apiKey,
-      modelVersion,
-      texture,
-      pbr,
-      smartLowPoly,
-      style,
-      seed
-    }
-  ) => {
-    try {
-      const outDir = join(app.getPath('temp'), 'ai-game-dev-hub')
-      if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
-
-      event.sender.send('modeling:progress', { step: 'Connecting to ComfyUI…', pct: 5 })
-
-      // Check ComfyUI is running
-      const ping = await comfyFetch(serverUrl, '/system_stats')
-      if (ping.status !== 200)
-        return { success: false, error: `ComfyUI server not reachable at ${serverUrl}` }
-
-      let workflow
-      let outputNodeId = '1'
-
-      if (mode === 'image' && imagePath) {
-        event.sender.send('modeling:progress', { step: 'Uploading image to ComfyUI…', pct: 12 })
-        const uploadRes = await comfyUploadImage(serverUrl, imagePath)
-        if (!uploadRes.name)
-          return { success: false, error: 'Image upload failed: ' + JSON.stringify(uploadRes) }
-        workflow = buildTripoImageWorkflow({
-          imageName: uploadRes.name,
-          apiKey,
-          modelVersion,
-          texture,
-          pbr,
-          smartLowPoly,
-          style,
-          seed
-        })
-        outputNodeId = '2'
-      } else {
-        workflow = buildTripoTextWorkflow({
-          prompt,
-          apiKey,
-          modelVersion,
-          texture,
-          pbr,
-          smartLowPoly,
-          style,
-          seed
-        })
-        outputNodeId = '1'
-      }
-
-      event.sender.send('modeling:progress', { step: 'Queuing workflow in ComfyUI…', pct: 18 })
-      const clientId = `aigamedev-${Date.now()}`
-      const queueRes = await comfyFetch(serverUrl, '/prompt', 'POST', {
-        prompt: workflow,
-        client_id: clientId
-      })
-      if (queueRes.status !== 200)
-        return { success: false, error: 'Queue failed: ' + JSON.stringify(queueRes.body) }
-
-      const promptId = queueRes.body.prompt_id
-      event.sender.send('modeling:progress', {
-        step: `Queued (${promptId.slice(0, 8)}…) — waiting for Tripo…`,
-        pct: 25
-      })
-
-      // Poll /history/{prompt_id} until complete (Tripo takes ~15-30s)
-      let attempts = 0
-      while (attempts < 180) {
-        await new Promise((r) => setTimeout(r, 2000))
-        attempts++
-
-        const histRes = await comfyFetch(serverUrl, `/history/${promptId}`)
-        if (histRes.status !== 200 || !histRes.body[promptId]) continue
-
-        const entry = histRes.body[promptId]
-        const status = entry.status
-
-        if (status?.status_str === 'error') {
-          const msgs =
-            status.messages?.map((m) => m[1]?.exception_message || m[1]).join(' | ') ||
-            'Unknown error'
-          return { success: false, error: 'ComfyUI error: ' + msgs }
-        }
-
-        // Estimate progress from queue position
-        const pct = Math.min(90, 25 + attempts * 1.5)
-        event.sender.send('modeling:progress', {
-          step: `Generating 3D model (${Math.round(pct)}%)…`,
-          pct
-        })
-
-        if (status?.completed) {
-          // Get the output model file from the node output
-          const outputs = entry.outputs || {}
-          const nodeOut = outputs[outputNodeId]
-          let modelFilePath = null
-
-          if (nodeOut?.model_file) {
-            // TripoAPIDraft returns a STRING with full file path
-            modelFilePath = Array.isArray(nodeOut.model_file)
-              ? nodeOut.model_file[0]
-              : nodeOut.model_file
-          }
-
-          if (!modelFilePath) {
-            // Scan all outputs for a .glb file path
-            for (const out of Object.values(outputs)) {
-              if (out?.model_file) {
-                modelFilePath = Array.isArray(out.model_file) ? out.model_file[0] : out.model_file
-                break
-              }
-            }
-          }
-
-          if (!modelFilePath)
-            return { success: false, error: 'Workflow complete but no model file in output' }
-
-          // Copy to our temp dir
-          event.sender.send('modeling:progress', { step: 'Copying model to workspace…', pct: 95 })
-          const outputPath = join(outDir, `comfyui_${Date.now()}.glb`)
-          copyFileSync(modelFilePath, outputPath)
-
-          event.sender.send('modeling:progress', { step: 'Model ready!', pct: 100 })
-          return { success: true, outputPath, provider: 'comfyui-tripo', promptId }
-        }
-      }
-      return { success: false, error: 'Timed out waiting for ComfyUI (>6 min)' }
-    } catch (e) {
-      return { success: false, error: e.message }
     }
   }
 )

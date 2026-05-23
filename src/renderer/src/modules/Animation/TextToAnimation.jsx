@@ -369,10 +369,10 @@ export default function TextToAnimation({ onProgress, onResult, onClear, result 
             <strong style={{ color: '#c4b5fd' }}>
               🔥 HY-Motion 1.0{model === 'hymotion-lite' ? ' Lite' : ''}
             </strong>{' '}
-            via HuggingFace Space
+            text-to-motion
             <br />
             <span style={{ color: '#555b6e' }}>
-              Tencent&apos;s SOTA text-to-3D motion model · Roblox export requires a BVH result
+              Tencent&apos;s motion model for Roblox-ready BVH export
             </span>
           </div>
         ) : null}

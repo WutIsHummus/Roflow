@@ -11,7 +11,8 @@ import {
   buildRigNameMap,
   canonicalizeMotionClip,
   canonicalizeMotionSkeleton,
-  dataUrlToArrayBuffer
+  dataUrlToArrayBuffer,
+  normName
 } from '../Modeling/r15Utils'
 
 const PANEL = {
@@ -71,6 +72,60 @@ const PANEL = {
     fontSize: 12,
     color: '#9aa0b0',
     lineHeight: 1.7
+  },
+  nodeStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    marginTop: 14
+  },
+  nodeWrap: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 10
+  },
+  nodeConnector: {
+    width: 2,
+    height: 18,
+    background: 'linear-gradient(180deg,rgba(124,58,237,0.4),rgba(167,139,250,0.08))',
+    borderRadius: 999,
+    alignSelf: 'center'
+  },
+  nodeShell: {
+    background: '#141821',
+    border: '1px solid #202533',
+    borderRadius: 14,
+    padding: 14
+  },
+  nodeHead: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8
+  },
+  nodeTitle: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: '#eef0f6'
+  },
+  nodeMeta: {
+    fontSize: 11,
+    color: '#8c93a7',
+    lineHeight: 1.6
+  },
+  nodeAction: {
+    border: '1px solid #2a3040',
+    borderRadius: 9,
+    padding: '8px 10px',
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#c4cad8',
+    background: '#171b24',
+    cursor: 'pointer',
+    marginTop: 10,
+    width: '100%'
   }
 }
 
@@ -78,6 +133,8 @@ const ENV_SPACING = 2.8
 
 export default function PlaygroundModule({ workflowState, onChangeModule }) {
   const animationResult = workflowState?.animationResult || null
+  const clothingWorkflow = workflowState?.clothingWorkflow || null
+  const activeClothing = clothingWorkflow?.resultDataUrl ? clothingWorkflow : null
   const accessories = useMemo(
     () => (workflowState?.charParts || []).filter((part) => part.status === 'done' && part.dataUrl),
     [workflowState]
@@ -86,61 +143,171 @@ export default function PlaygroundModule({ workflowState, onChangeModule }) {
     () => (workflowState?.envParts || []).filter((part) => part.status === 'done' && part.dataUrl),
     [workflowState]
   )
+  const uiWorkflow = workflowState?.uiWorkflow || null
+  const uiFrames = useMemo(
+    () =>
+      (uiWorkflow?.screens || []).filter(
+        (frame) =>
+          frame.name?.trim() ||
+          frame.objective?.trim() ||
+          frame.layoutNotes?.trim() ||
+          frame.motionNotes?.trim()
+      ),
+    [uiWorkflow]
+  )
+  const readyUiFrames = useMemo(
+    () => uiFrames.filter((frame) => frame.status === 'ready'),
+    [uiFrames]
+  )
+  const uiComponentCount = uiFrames.reduce((total, frame) => total + (frame.components?.length || 0), 0)
+  const uiInteractionCount = uiFrames.reduce(
+    (total, frame) => total + (frame.interactions?.length || 0),
+    0
+  )
+  const workflowNodes = [
+    {
+      id: 'animation',
+      title: 'Animation Node',
+      ready: Boolean(animationResult?.bvhPath),
+      accent: '#a78bfa',
+      actionLabel: 'Open Animation',
+      summary: animationResult?.bvhPath
+        ? animationResult.type === 'video'
+          ? 'Video-driven BVH is feeding the rig.'
+          : 'Text-generated BVH is feeding the rig.'
+        : 'No motion connected yet.'
+    },
+    {
+      id: 'clothing',
+      title: 'Clothing Node',
+      ready: Boolean(activeClothing?.resultDataUrl),
+      accent: '#38bdf8',
+      actionLabel: 'Open Clothing',
+      summary: activeClothing?.resultDataUrl
+        ? `Classic ${activeClothing.assetType || 'shirt'} texture is ready for the avatar overlay.`
+        : 'No classic clothing texture connected yet.'
+    },
+    {
+      id: 'modeling',
+      title: 'Accessories Node',
+      ready: accessories.length > 0,
+      accent: '#4ade80',
+      actionLabel: 'Open Modeling',
+      summary:
+        accessories.length > 0
+          ? `${accessories.length} accessory${accessories.length === 1 ? '' : 'ies'} attached to the character preview.`
+          : 'No generated accessories connected yet.'
+    },
+    {
+      id: 'modeling-environment',
+      title: 'Environment Node',
+      ready: envParts.length > 0,
+      accent: '#f59e0b',
+      actionLabel: 'Open Modeling',
+      actionModule: 'modeling',
+      summary:
+        envParts.length > 0
+          ? `${envParts.length} environment part${envParts.length === 1 ? '' : 's'} placed around the rig.`
+          : 'No scene dressing connected yet.'
+    },
+    {
+      id: 'ui',
+      title: 'UI Node',
+      ready: readyUiFrames.length > 0,
+      accent: '#fb7185',
+      actionLabel: 'Open UI Studio',
+      summary:
+        readyUiFrames.length > 0
+          ? `${readyUiFrames.length} ready UI frame${readyUiFrames.length === 1 ? '' : 's'} with ${uiComponentCount} components and ${uiInteractionCount} interactions mapped into the workflow.`
+          : 'No ready UI frames connected yet.'
+    }
+  ]
+  const connectedNodeCount = workflowNodes.filter((node) => node.ready).length
 
   return (
     <div style={PANEL.page}>
       <div style={PANEL.side}>
         <h1 style={PANEL.title}>Workflow Playground</h1>
         <p style={PANEL.desc}>
-          Test the latest animation on an R15 character with equipped accessories and generated
-          environment parts in one shared viewport.
+          Streamline the flow as one connected graph: motion, classic clothing, accessories,
+          environment, and UI all feed the same Roblox preview stage.
         </p>
 
         <div style={PANEL.card}>
-          <div style={PANEL.cardTitle}>Animation</div>
+          <div style={PANEL.cardTitle}>Playground graph</div>
           <div style={PANEL.cardValue}>
-            {animationResult?.bvhPath
-              ? animationResult.type === 'video'
-                ? 'Video motion loaded'
-                : 'Text motion loaded'
-              : 'No motion loaded'}
+            {connectedNodeCount}/{workflowNodes.length} node{workflowNodes.length === 1 ? '' : 's'} connected
           </div>
           <div style={PANEL.cardText}>
-            {animationResult?.prompt ||
-              animationResult?.videoPath ||
-              'Generate an animation in Animation Studio to drive the character here.'}
+            This is a lightweight node-based review board rather than a full graph editor, so you
+            can jump between modules quickly and see what is already feeding the live viewport.
+          </div>
+        </div>
+
+        <div style={PANEL.nodeStack}>
+          {workflowNodes.map((node, index) => (
+            <div key={node.id} style={PANEL.nodeWrap}>
+              {index > 0 && <div style={PANEL.nodeConnector} />}
+              <div
+                style={{
+                  ...PANEL.nodeShell,
+                  border: node.ready ? `1px solid ${node.accent}55` : '1px solid #202533',
+                  boxShadow: node.ready ? `0 0 0 1px ${node.accent}15 inset` : 'none'
+                }}
+              >
+                <div style={PANEL.nodeHead}>
+                  <div style={PANEL.nodeTitle}>{node.title}</div>
+                  <span style={badgeStyle(node.ready ? node.accent : '#6b7280')}>
+                    {node.ready ? 'Connected' : 'Waiting'}
+                  </span>
+                </div>
+                <div style={PANEL.nodeMeta}>{node.summary}</div>
+                <button
+                  style={PANEL.nodeAction}
+                  onClick={() => onChangeModule?.(node.actionModule || node.id)}
+                >
+                  {node.actionLabel}
+                </button>
+              </div>
+            </div>
+          ))}
+          <div style={PANEL.nodeConnector} />
+          <div style={{ ...PANEL.nodeShell, border: '1px solid rgba(124,58,237,0.45)' }}>
+            <div style={PANEL.nodeHead}>
+              <div style={PANEL.nodeTitle}>Playground Output</div>
+              <span style={badgeStyle('#c4b5fd')}>Live</span>
+            </div>
+            <div style={PANEL.nodeMeta}>
+              Combined preview of the animated R15 rig, classic clothing overlay, equipped
+              accessories, scene parts, and workflow state.
+            </div>
           </div>
         </div>
 
         <div style={PANEL.card}>
-          <div style={PANEL.cardTitle}>Accessories</div>
+          <div style={PANEL.cardTitle}>Connected clothing</div>
           <div style={PANEL.cardValue}>
-            {accessories.length} equipped item{accessories.length === 1 ? '' : 's'}
+            {activeClothing?.resultDataUrl
+              ? `Classic ${activeClothing.assetType || 'shirt'} ready`
+              : 'No clothing texture yet'}
           </div>
           <div style={PANEL.cardText}>
-            Accessories generated in Modeling automatically snap to Roblox-style attachment points
-            in this view.
+            {activeClothing?.resultDataUrl
+              ? 'The generated texture is projected onto the rig as an overlay so you can judge seams and silhouette while the character animates.'
+              : 'Generate a classic shirt or pants texture in Clothing Studio and it will appear on the rig here automatically.'}
           </div>
-        </div>
-
-        <div style={PANEL.card}>
-          <div style={PANEL.cardTitle}>Environment</div>
-          <div style={PANEL.cardValue}>
-            {envParts.length} scene part{envParts.length === 1 ? '' : 's'}
-          </div>
-          <div style={PANEL.cardText}>
-            Environment parts are arranged around the animated character so you can quickly judge
-            scale, clipping, and overall feel.
-          </div>
-        </div>
-
-        <div style={PANEL.buttonRow}>
-          <button style={PANEL.primaryBtn} onClick={() => onChangeModule?.('animation')}>
-            Go to Animation
-          </button>
-          <button style={PANEL.secondaryBtn} onClick={() => onChangeModule?.('modeling')}>
-            Go to Modeling
-          </button>
+          {activeClothing?.resultDataUrl && (
+            <img
+              src={activeClothing.resultDataUrl}
+              alt="Connected classic clothing texture"
+              style={{
+                width: '100%',
+                marginTop: 12,
+                borderRadius: 10,
+                border: '1px solid #252a36'
+              }}
+            />
+          )}
         </div>
 
         <div style={PANEL.hint}>
@@ -148,15 +315,20 @@ export default function PlaygroundModule({ workflowState, onChangeModule }) {
           <br />
           1. Generate motion in Animation
           <br />
-          2. Generate accessories / scene parts in Modeling
+          2. Generate classic shirt or pants textures in Clothing
           <br />
-          3. Return here to test them together
+          3. Generate accessories / scene parts in Modeling
+          <br />
+          4. Create UI frames in UI Studio
+          <br />
+          5. Return here to review the connected node flow in one viewport
         </div>
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <WorkflowViewport
           animationResult={animationResult}
+          clothingAsset={activeClothing}
           accessories={accessories}
           envParts={envParts}
         />
@@ -165,12 +337,12 @@ export default function PlaygroundModule({ workflowState, onChangeModule }) {
   )
 }
 
-function WorkflowViewport({ animationResult, accessories, envParts }) {
+function WorkflowViewport({ animationResult, clothingAsset, accessories, envParts }) {
   const mountRef = useRef(null)
   const stateRef = useRef({})
   const [rigReady, setRigReady] = useState(0)
   const [playing, setPlaying] = useState(true)
-  const [status, setStatus] = useState({ rig: false, motion: false, error: null })
+  const [status, setStatus] = useState({ rig: false, motion: false, clothing: false, error: null })
 
   useEffect(() => {
     const el = mountRef.current
@@ -241,6 +413,7 @@ function WorkflowViewport({ animationResult, accessories, envParts }) {
       rigGroup,
       envMap: new Map(),
       accMap: new Map(),
+      clothingOverlays: [],
       playing: true
     }
 
@@ -399,6 +572,65 @@ function WorkflowViewport({ animationResult, accessories, envParts }) {
 
   useEffect(() => {
     const s = stateRef.current
+    if (!s.rigScene) return
+
+    clearClothingOverlays(s)
+
+    if (!clothingAsset?.resultDataUrl) {
+      setStatus((prev) => ({ ...prev, clothing: false }))
+      focusScene(s)
+      return
+    }
+
+    const textureLoader = new THREE.TextureLoader()
+    textureLoader.load(
+      clothingAsset.resultDataUrl,
+      (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace
+        texture.flipY = false
+        texture.needsUpdate = true
+
+        const overlays = []
+        s.rigScene.traverse((obj) => {
+          if (!obj?.isSkinnedMesh || !isClothingTargetMesh(obj.name, clothingAsset.assetType)) return
+
+          const overlayMaterial = new THREE.MeshStandardMaterial({
+            map: texture,
+            transparent: true,
+            alphaTest: 0.05,
+            depthWrite: false
+          })
+          overlayMaterial.skinning = true
+          overlayMaterial.side = THREE.FrontSide
+          overlayMaterial.polygonOffset = true
+          overlayMaterial.polygonOffsetFactor = -1
+          overlayMaterial.polygonOffsetUnits = 1
+
+          const overlayMesh = new THREE.SkinnedMesh(obj.geometry, overlayMaterial)
+          overlayMesh.name = `__clothing_overlay_${clothingAsset.assetType}_${obj.name}`
+          overlayMesh.bind(obj.skeleton, obj.bindMatrix)
+          overlayMesh.bindMode = obj.bindMode
+          overlayMesh.renderOrder = (obj.renderOrder || 0) + 1
+          overlayMesh.castShadow = false
+          overlayMesh.receiveShadow = false
+          overlayMesh.position.copy(obj.position)
+          overlayMesh.quaternion.copy(obj.quaternion)
+          overlayMesh.scale.copy(obj.scale)
+          obj.parent?.add(overlayMesh)
+          overlays.push({ mesh: overlayMesh, material: overlayMaterial })
+        })
+
+        s.clothingOverlays = overlays
+        setStatus((prev) => ({ ...prev, clothing: overlays.length > 0, error: null }))
+        focusScene(s)
+      },
+      undefined,
+      (err) => setStatus((prev) => ({ ...prev, clothing: false, error: `Clothing overlay failed: ${err.message}` }))
+    )
+  }, [clothingAsset?.assetType, clothingAsset?.resultDataUrl, rigReady])
+
+  useEffect(() => {
+    const s = stateRef.current
     if (!s.scene || !s.rigScene || !s.targetMesh) return
 
     if (s.action) {
@@ -487,6 +719,7 @@ function WorkflowViewport({ animationResult, accessories, envParts }) {
         <span style={badgeStyle('#555b6e')}>Connected Preview</span>
         {status.rig && <span style={badgeStyle('#4ade80')}>R15 Ready</span>}
         {status.motion && <span style={badgeStyle('#a78bfa')}>Motion Applied</span>}
+        {status.clothing && <span style={badgeStyle('#38bdf8')}>Clothing Applied</span>}
       </div>
 
       <div style={{ position: 'absolute', top: 10, right: 12, display: 'flex', gap: 8 }}>
@@ -529,14 +762,17 @@ function WorkflowViewport({ animationResult, accessories, envParts }) {
         </div>
       )}
 
-      {!animationResult?.bvhPath && accessories.length === 0 && envParts.length === 0 && (
+      {!animationResult?.bvhPath &&
+        !clothingAsset?.resultDataUrl &&
+        accessories.length === 0 &&
+        envParts.length === 0 && (
         <div style={emptyStateStyle}>
           <p style={{ fontSize: 15, fontWeight: 700, color: '#c4cad8', margin: 0 }}>
             Nothing to preview yet
           </p>
           <p style={{ fontSize: 12, color: '#596071', margin: '8px 0 0' }}>
-            Generate animation, accessories, or environment parts and they will appear here
-            automatically.
+            Generate animation, classic clothing, accessories, or environment parts and they will
+            appear here automatically.
           </p>
         </div>
       )}
@@ -567,6 +803,34 @@ function focusScene(state) {
   state.orbit.target.copy(center)
   state.camera.position.set(center.x, center.y + maxDim * 0.45, center.z + maxDim * 1.7 + 1.4)
   state.camera.lookAt(center)
+}
+
+function clearClothingOverlays(state) {
+  if (!state?.clothingOverlays?.length) {
+    state.clothingOverlays = []
+    return
+  }
+
+  for (const overlay of state.clothingOverlays) {
+    overlay.mesh.parent?.remove(overlay.mesh)
+    overlay.material.dispose()
+  }
+  state.clothingOverlays = []
+}
+
+function isClothingTargetMesh(name, assetType) {
+  const normalized = normName(name)
+  if (!normalized) return false
+
+  const isTorso = normalized.includes('torso')
+  const isArm = normalized.includes('arm')
+  const isLeg = normalized.includes('leg') || normalized.includes('foot')
+
+  if ((assetType || 'shirt') === 'pants') {
+    return normalized.includes('lowertorso') || isLeg
+  }
+
+  return isTorso || isArm
 }
 
 function badgeStyle(color) {

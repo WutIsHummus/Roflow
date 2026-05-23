@@ -35,6 +35,22 @@ const NAV_ITEMS = [
     badge: null
   },
   {
+    id: 'clothing',
+    label: 'Clothing',
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        className="w-5 h-5"
+      >
+        <path d="M8 4l-2 3-3 1 2 5h3v7h8v-7h3l2-5-3-1-2-3-3 2-2-2-2 2-3-2z" />
+      </svg>
+    ),
+    badge: 'New'
+  },
+  {
     id: 'playground',
     label: 'Playground',
     icon: (
@@ -49,6 +65,23 @@ const NAV_ITEMS = [
       </svg>
     ),
     badge: 'Beta'
+  },
+  {
+    id: 'ui',
+    label: 'UI Studio',
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        className="w-5 h-5"
+      >
+        <rect x="3" y="4" width="18" height="14" rx="2" />
+        <path d="M7 8h4M7 12h10M7 16h6" />
+      </svg>
+    ),
+    badge: 'New'
   },
   {
     id: 'sfx',
@@ -82,7 +115,7 @@ const NAV_ITEMS = [
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
       </svg>
     ),
-    badge: 'Soon'
+    badge: 'New'
   }
 ]
 
