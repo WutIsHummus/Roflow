@@ -85,7 +85,7 @@ function createPlaneMaterial(layer, texture) {
     transparent: true,
     opacity: clamp(layer.opacity, 0.05, 1),
     depthWrite: false,
-    blending: layer.blendMode === 'alpha' ? THREE.NormalBlending : THREE.AdditiveBlending,
+    blending: (layer.lightEmission ?? 1) > 0.5 ? THREE.AdditiveBlending : THREE.NormalBlending,
     side: THREE.DoubleSide,
     color: new THREE.Color(0xffffff)
   })

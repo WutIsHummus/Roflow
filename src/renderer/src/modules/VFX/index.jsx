@@ -54,6 +54,21 @@ const SHAPE_OPTIONS = [
   { id: 'flare', label: 'Flare' }
 ]
 
+const FLIPBOOK_LAYOUTS = [
+  { id: 'None', label: 'None (single frame)' },
+  { id: 'Grid2x2', label: 'Grid 2×2 (4 frames)' },
+  { id: 'Grid4x4', label: 'Grid 4×4 (16 frames)' },
+  { id: 'Grid8x8', label: 'Grid 8×8 (64 frames)' }
+]
+
+const FLIPBOOK_MODES = [
+  { id: 'None', label: 'None' },
+  { id: 'Loop', label: 'Loop' },
+  { id: 'PingPong', label: 'Ping-Pong' },
+  { id: 'Random', label: 'Random' },
+  { id: 'OneShot', label: 'One Shot' }
+]
+
 const PROVIDERS = {
   manus: {
     label: 'Manus',
@@ -87,7 +102,8 @@ function createLayer(overrides = {}) {
     role: 'main hit flash',
     shape: 'orb',
     enabled: true,
-    blendMode: 'add',
+    lightEmission: 1,
+    lightInfluence: 0,
     textureHint: 'soft additive orb sprite',
     color: '#a78bfa',
     secondaryColor: '#f8fafc',
@@ -101,7 +117,8 @@ function createLayer(overrides = {}) {
     speedMax: 18,
     spread: 18,
     drag: 0.12,
-    flipbookFrames: 1,
+    flipbookLayout: 'None',
+    flipbookMode: 'None',
     notes: '',
     ...overrides
   }
@@ -491,7 +508,8 @@ function buildPreset(workflow) {
         role: layer.role,
         shape: layer.shape,
         textureHint: layer.textureHint,
-        blendMode: layer.blendMode,
+        lightEmission: clamp(layer.lightEmission ?? 1, 0, 1),
+        lightInfluence: clamp(layer.lightInfluence ?? 0, 0, 1),
         color: {
           primary: layer.color,
           secondary: layer.secondaryColor
@@ -512,7 +530,8 @@ function buildPreset(workflow) {
         },
         spread: Math.round(layer.spread),
         drag: Number(layer.drag.toFixed(2)),
-        flipbookFrames: Math.max(1, Math.round(layer.flipbookFrames)),
+        flipbookLayout: layer.flipbookLayout || 'None',
+        flipbookMode: layer.flipbookMode || 'None',
         notes: layer.notes || ''
       }
     })
@@ -602,7 +621,8 @@ function buildLuaScript(preset) {
           `  ${baseName}.Attachment0 = ${baseName}Start`,
           `  ${baseName}.Attachment1 = ${baseName}End`,
           `  ${baseName}.FaceCamera = true`,
-          `  ${baseName}.LightEmission = 1`,
+          `  ${baseName}.LightEmission = ${layer.lightEmission.toFixed(2)}`,
+          `  ${baseName}.LightInfluence = ${layer.lightInfluence.toFixed(2)}`,
           `  ${baseName}.Color = ${buildColorSequence(layer.color.primary, layer.color.secondary)}`,
           `  ${baseName}.Transparency = ${buildNumberSequence(layer.opacity)}`,
           `  ${baseName}.Width0 = ${layer.size.min.toFixed(2)}`,
@@ -628,6 +648,8 @@ function buildLuaScript(preset) {
           `  ${baseName}.Attachment1 = ${baseName}End`,
           `  ${baseName}.FaceCamera = true`,
           `  ${baseName}.Lifetime = ${layer.lifetime.max.toFixed(2)}`,
+          `  ${baseName}.LightEmission = ${layer.lightEmission.toFixed(2)}`,
+          `  ${baseName}.LightInfluence = ${layer.lightInfluence.toFixed(2)}`,
           `  ${baseName}.Color = ${buildColorSequence(layer.color.primary, layer.color.secondary)}`,
           `  ${baseName}.Transparency = ${buildNumberSequence(layer.opacity)}`,
           `  ${baseName}.MinLength = 0.05`,
@@ -667,13 +689,20 @@ function buildLuaScript(preset) {
         `  ${baseName}.Speed = NumberRange.new(${layer.speed.min.toFixed(2)}, ${layer.speed.max.toFixed(2)})`,
         `  ${baseName}.SpreadAngle = Vector2.new(${layer.spread}, ${layer.spread})`,
         `  ${baseName}.Drag = ${layer.drag.toFixed(2)}`,
-        `  ${baseName}.LightEmission = 1`,
+        `  ${baseName}.LightEmission = ${layer.lightEmission.toFixed(2)}`,
+        `  ${baseName}.LightInfluence = ${layer.lightInfluence.toFixed(2)}`,
         `  ${baseName}.Color = ${buildColorSequence(layer.color.primary, layer.color.secondary)}`,
         `  ${baseName}.Transparency = ${buildNumberSequence(layer.opacity)}`,
         `  ${baseName}.Size = ${buildSizeSequence(layer.size.min, layer.size.max)}`,
+        layer.flipbookLayout !== 'None'
+          ? `  ${baseName}.FlipbookLayout = Enum.ParticleFlipbookLayout.${layer.flipbookLayout}`
+          : null,
+        layer.flipbookMode !== 'None'
+          ? `  ${baseName}.FlipbookMode = Enum.ParticleFlipbookMode.${layer.flipbookMode}`
+          : null,
         `  ${baseName}.Parent = anchor`,
         ''
-      ].join('\n')
+      ].filter(Boolean).join('\n')
     })
     .join('\n')
 
@@ -1472,16 +1501,20 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
                       </select>
                     </div>
                     <div>
-                      <label style={S.label}>Blend</label>
-                      <select
+                      <label style={S.label}>Light Emission</label>
+                      <input
                         style={S.input}
-                        value={activeLayer.blendMode}
-                        onChange={(event) => updateLayer(activeLayer.id, { blendMode: event.target.value })}
-                      >
-                        <option value="add">Additive</option>
-                        <option value="alpha">Alpha</option>
-                        <option value="soft">Soft</option>
-                      </select>
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={activeLayer.lightEmission ?? 1}
+                        onChange={(event) =>
+                          updateLayer(activeLayer.id, {
+                            lightEmission: clamp(Number(event.target.value) || 0, 0, 1)
+                          })
+                        }
+                      />
                     </div>
                   </div>
 
@@ -1515,7 +1548,7 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
                       />
                     </div>
                     <div>
-                      <label style={S.label}>Opacity</label>
+                      <label style={S.label}>Opacity (0–1)</label>
                       <input
                         style={S.input}
                         type="number"
@@ -1531,20 +1564,51 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
                       />
                     </div>
                     <div>
-                      <label style={S.label}>Flipbook Frames</label>
+                      <label style={S.label}>Light Influence</label>
                       <input
                         style={S.input}
                         type="number"
-                        min="1"
-                        max="24"
-                        step="1"
-                        value={activeLayer.flipbookFrames}
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={activeLayer.lightInfluence ?? 0}
                         onChange={(event) =>
                           updateLayer(activeLayer.id, {
-                            flipbookFrames: clamp(Number(event.target.value) || 1, 1, 24)
+                            lightInfluence: clamp(Number(event.target.value) || 0, 0, 1)
                           })
                         }
                       />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div>
+                      <label style={S.label}>Flipbook Layout</label>
+                      <select
+                        style={S.input}
+                        value={activeLayer.flipbookLayout || 'None'}
+                        onChange={(event) => updateLayer(activeLayer.id, { flipbookLayout: event.target.value })}
+                      >
+                        {FLIPBOOK_LAYOUTS.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={S.label}>Flipbook Mode</label>
+                      <select
+                        style={S.input}
+                        value={activeLayer.flipbookMode || 'None'}
+                        onChange={(event) => updateLayer(activeLayer.id, { flipbookMode: event.target.value })}
+                      >
+                        {FLIPBOOK_MODES.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
