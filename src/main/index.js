@@ -1138,48 +1138,79 @@ function normalizeTextToMotionError(err) {
   return message
 }
 
-ipcMain.handle('animation:textToMotion', async (event, { prompt, model, duration }) => {
-  const send = (step, pct) => event.sender.send('animation:progress', { step, pct })
-  try {
-    const outDir = join(app.getPath('temp'), 'ai-game-dev-hub')
-    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
-
-    const { Client } = await import('@gradio/client')
-
-    send('Connecting to HY-Motion...', 10)
-    const client = await Client.connect('tencent/HY-Motion-1.0', { hf_token: undefined })
-
-    send('Generating motion with HY-Motion 1.0...', 30)
-    const result = await client.predict('/generate', {
-      text: prompt,
-      motion_length: duration,
-      num_seeds: 1,
-      // Lite mode uses a lighter checkpoint if the space supports it
-      ...(model === 'hymotion-lite' ? { model_variant: 'lite' } : {})
-    })
-
-    send('Downloading motion file...', 80)
-    const found = extractMotionFile(result?.data, ['.bvh'])
-    if (!found) {
-      const formats = listMotionFormats(result?.data)
-      const formatLabel = formats.length
-        ? formats.map((f) => f.toUpperCase()).join(', ')
-        : 'no downloadable motion file'
-      return {
-        success: false,
-        error: `HY-Motion did not return a BVH file required for Roblox retargeting. Received ${formatLabel}.`
-      }
+ipcMain.removeHandler('animation:textToMotion')
+ipcMain.handle('animation:textToMotion', async (event, payload = {}) => {
+  const sender = event?.sender
+  const send = (step, pct) => {
+    try {
+      if (!sender || sender.isDestroyed()) return
+      sender.send('animation:progress', { step, pct })
+    } catch {
+      // Sender can be destroyed while long-running work is in flight.
     }
-
-    const outPath = join(outDir, `motion_${Date.now()}${found.ext}`)
-    if (found.url.startsWith('http')) await downloadFile(found.url, outPath)
-    else writeFileSync(outPath, readFileSync(found.url))
-
-    send('Done!', 100)
-    return { success: true, bvhPath: outPath, format: found.ext.slice(1) }
-  } catch (err) {
-    return { success: false, error: normalizeTextToMotionError(err) }
   }
+
+  const prompt =
+    typeof payload.prompt === 'string' ? payload.prompt.trim() : ''
+  const model = payload.model === 'hymotion-lite' ? 'hymotion-lite' : 'hymotion'
+  const duration = Number(payload.duration)
+  const safeDuration = [2, 4, 6, 8].includes(duration) ? duration : 4
+
+  if (!prompt) {
+    return { success: false, error: 'Please enter an animation prompt.' }
+  }
+
+  const run = async () => {
+    try {
+      const outDir = join(app.getPath('temp'), 'ai-game-dev-hub')
+      if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
+
+      const { Client } = await import('@gradio/client')
+
+      send('Connecting to HY-Motion...', 10)
+      const client = await Client.connect('tencent/HY-Motion-1.0', { hf_token: undefined })
+
+      send('Generating motion with HY-Motion 1.0...', 30)
+      const result = await client.predict('/generate', {
+        text: prompt,
+        motion_length: safeDuration,
+        num_seeds: 1,
+        // Lite mode uses a lighter checkpoint if the space supports it
+        ...(model === 'hymotion-lite' ? { model_variant: 'lite' } : {})
+      })
+
+      send('Downloading motion file...', 80)
+      const found = extractMotionFile(result?.data, ['.bvh'])
+      if (!found) {
+        const formats = listMotionFormats(result?.data)
+        const formatLabel = formats.length
+          ? formats.map((f) => f.toUpperCase()).join(', ')
+          : 'no downloadable motion file'
+        return {
+          success: false,
+          error: `HY-Motion did not return a BVH file required for Roblox retargeting. Received ${formatLabel}.`
+        }
+      }
+
+      const outPath = join(outDir, `motion_${Date.now()}${found.ext}`)
+      if (found.url.startsWith('http')) await downloadFile(found.url, outPath)
+      else writeFileSync(outPath, readFileSync(found.url))
+
+      send('Done!', 100)
+      return { success: true, bvhPath: outPath, format: found.ext.slice(1) }
+    } catch (err) {
+      return { success: false, error: normalizeTextToMotionError(err) }
+    }
+  }
+
+  const TIMEOUT_MS = 180000
+  return Promise.race([
+    run(),
+    wait(TIMEOUT_MS).then(() => ({
+      success: false,
+      error: 'HY-Motion request timed out. Please try again.'
+    }))
+  ])
 })
 
 // ── IPC: Animation — Video to Motion (MediaPipe / WHAM) ──────────────────
