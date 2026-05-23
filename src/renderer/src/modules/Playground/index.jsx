@@ -11,9 +11,9 @@ import {
   buildRigNameMap,
   canonicalizeMotionClip,
   canonicalizeMotionSkeleton,
-  dataUrlToArrayBuffer,
-  normName
+  dataUrlToArrayBuffer
 } from '../Modeling/r15Utils'
+import { clearClassicClothingAvatar, createClassicClothingAvatar } from '../Clothing/classicClothingRig'
 
 const PANEL = {
   page: { display: 'flex', height: '100%', overflow: 'hidden', background: '#0f1116' },
@@ -134,7 +134,24 @@ const ENV_SPACING = 2.8
 export default function PlaygroundModule({ workflowState, onChangeModule }) {
   const animationResult = workflowState?.animationResult || null
   const clothingWorkflow = workflowState?.clothingWorkflow || null
-  const activeClothing = clothingWorkflow?.resultDataUrl ? clothingWorkflow : null
+  const activeClothing = useMemo(() => {
+    const assets = {
+      shirt: null,
+      pants: null,
+      outfit: null,
+      ...(clothingWorkflow?.assets || {})
+    }
+    if (clothingWorkflow?.resultDataUrl && !assets[clothingWorkflow.assetType]?.resultDataUrl) {
+      assets[clothingWorkflow.assetType || 'shirt'] = {
+        resultDataUrl: clothingWorkflow.resultDataUrl,
+        resultPath: clothingWorkflow.resultPath
+      }
+    }
+    const activeDataUrl = assets[clothingWorkflow?.assetType || 'shirt']?.resultDataUrl || clothingWorkflow?.resultDataUrl || null
+    const shirtDataUrl = assets.shirt?.resultDataUrl || assets.outfit?.resultDataUrl || activeDataUrl
+    const pantsDataUrl = assets.pants?.resultDataUrl || assets.outfit?.resultDataUrl || activeDataUrl
+    return shirtDataUrl || pantsDataUrl ? { shirtDataUrl, pantsDataUrl } : null
+  }, [clothingWorkflow])
   const accessories = useMemo(
     () => (workflowState?.charParts || []).filter((part) => part.status === 'done' && part.dataUrl),
     [workflowState]
@@ -180,11 +197,14 @@ export default function PlaygroundModule({ workflowState, onChangeModule }) {
     {
       id: 'clothing',
       title: 'Clothing Node',
-      ready: Boolean(activeClothing?.resultDataUrl),
+      ready: Boolean(activeClothing?.shirtDataUrl || activeClothing?.pantsDataUrl),
       accent: '#38bdf8',
       actionLabel: 'Open Clothing',
-      summary: activeClothing?.resultDataUrl
-        ? `Classic ${activeClothing.assetType || 'shirt'} texture is ready for the avatar overlay.`
+      summary: activeClothing?.shirtDataUrl || activeClothing?.pantsDataUrl
+        ? `Classic ${[
+            activeClothing.shirtDataUrl ? 'shirt' : null,
+            activeClothing.pantsDataUrl ? 'pants' : null
+          ].filter(Boolean).join(' + ')} texture is ready for the avatar preview.`
         : 'No classic clothing texture connected yet.'
     },
     {
@@ -287,26 +307,35 @@ export default function PlaygroundModule({ workflowState, onChangeModule }) {
         <div style={PANEL.card}>
           <div style={PANEL.cardTitle}>Connected clothing</div>
           <div style={PANEL.cardValue}>
-            {activeClothing?.resultDataUrl
-              ? `Classic ${activeClothing.assetType || 'shirt'} ready`
+            {activeClothing?.shirtDataUrl || activeClothing?.pantsDataUrl
+              ? `Classic ${[
+                  activeClothing.shirtDataUrl ? 'shirt' : null,
+                  activeClothing.pantsDataUrl ? 'pants' : null
+                ].filter(Boolean).join(' + ')} ready`
               : 'No clothing texture yet'}
           </div>
           <div style={PANEL.cardText}>
-            {activeClothing?.resultDataUrl
-              ? 'The generated texture is projected onto the rig as an overlay so you can judge seams and silhouette while the character animates.'
+            {activeClothing?.shirtDataUrl || activeClothing?.pantsDataUrl
+              ? 'The generated templates are mapped onto a blocky Roblox character so the shirt and pants panels can be judged together.'
               : 'Generate a classic shirt or pants texture in Clothing Studio and it will appear on the rig here automatically.'}
           </div>
-          {activeClothing?.resultDataUrl && (
-            <img
-              src={activeClothing.resultDataUrl}
-              alt="Connected classic clothing texture"
-              style={{
-                width: '100%',
-                marginTop: 12,
-                borderRadius: 10,
-                border: '1px solid #252a36'
-              }}
-            />
+          {(activeClothing?.shirtDataUrl || activeClothing?.pantsDataUrl) && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
+              {activeClothing.shirtDataUrl && (
+                <img
+                  src={activeClothing.shirtDataUrl}
+                  alt="Connected shirt texture"
+                  style={{ width: '100%', borderRadius: 10, border: '1px solid #252a36' }}
+                />
+              )}
+              {activeClothing.pantsDataUrl && (
+                <img
+                  src={activeClothing.pantsDataUrl}
+                  alt="Connected pants texture"
+                  style={{ width: '100%', borderRadius: 10, border: '1px solid #252a36' }}
+                />
+              )}
+            </div>
           )}
         </div>
 
@@ -413,7 +442,7 @@ function WorkflowViewport({ animationResult, clothingAsset, accessories, envPart
       rigGroup,
       envMap: new Map(),
       accMap: new Map(),
-      clothingOverlays: [],
+      clothingAvatar: null,
       playing: true
     }
 
@@ -574,60 +603,37 @@ function WorkflowViewport({ animationResult, clothingAsset, accessories, envPart
     const s = stateRef.current
     if (!s.rigScene) return
 
-    clearClothingOverlays(s)
+    clearClothingAvatar(s)
 
-    if (!clothingAsset?.resultDataUrl) {
+    if (!clothingAsset?.shirtDataUrl && !clothingAsset?.pantsDataUrl) {
+      setRigBodyVisible(s, true)
       setStatus((prev) => ({ ...prev, clothing: false }))
       focusScene(s)
       return
     }
 
-    const textureLoader = new THREE.TextureLoader()
-    textureLoader.load(
-      clothingAsset.resultDataUrl,
-      (texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace
-        texture.flipY = false
-        texture.needsUpdate = true
-
-        const overlays = []
-        s.rigScene.traverse((obj) => {
-          if (!obj?.isSkinnedMesh || !isClothingTargetMesh(obj.name, clothingAsset.assetType)) return
-
-          const overlayMaterial = new THREE.MeshStandardMaterial({
-            map: texture,
-            transparent: true,
-            alphaTest: 0.05,
-            depthWrite: false
-          })
-          overlayMaterial.skinning = true
-          overlayMaterial.side = THREE.FrontSide
-          overlayMaterial.polygonOffset = true
-          overlayMaterial.polygonOffsetFactor = -1
-          overlayMaterial.polygonOffsetUnits = 1
-
-          const overlayMesh = new THREE.SkinnedMesh(obj.geometry, overlayMaterial)
-          overlayMesh.name = `__clothing_overlay_${clothingAsset.assetType}_${obj.name}`
-          overlayMesh.bind(obj.skeleton, obj.bindMatrix)
-          overlayMesh.bindMode = obj.bindMode
-          overlayMesh.renderOrder = (obj.renderOrder || 0) + 1
-          overlayMesh.castShadow = false
-          overlayMesh.receiveShadow = false
-          overlayMesh.position.copy(obj.position)
-          overlayMesh.quaternion.copy(obj.quaternion)
-          overlayMesh.scale.copy(obj.scale)
-          obj.parent?.add(overlayMesh)
-          overlays.push({ mesh: overlayMesh, material: overlayMaterial })
-        })
-
-        s.clothingOverlays = overlays
-        setStatus((prev) => ({ ...prev, clothing: overlays.length > 0, error: null }))
+    let cancelled = false
+    Promise.all([loadTexture(clothingAsset.shirtDataUrl), loadTexture(clothingAsset.pantsDataUrl)])
+      .then(([shirtTexture, pantsTexture]) => {
+        if (cancelled) return
+        const avatar = createClassicClothingAvatar({ shirtTexture, pantsTexture })
+        s.scene.add(avatar)
+        s.clothingAvatar = avatar
+        setRigBodyVisible(s, false)
+        setStatus((prev) => ({
+          ...prev,
+          clothing: true,
+          error: null
+        }))
         focusScene(s)
-      },
-      undefined,
-      (err) => setStatus((prev) => ({ ...prev, clothing: false, error: `Clothing overlay failed: ${err.message}` }))
-    )
-  }, [clothingAsset?.assetType, clothingAsset?.resultDataUrl, rigReady])
+      })
+      .catch((err) =>
+        setStatus((prev) => ({ ...prev, clothing: false, error: `Clothing preview failed: ${err.message}` }))
+      )
+    return () => {
+      cancelled = true
+    }
+  }, [clothingAsset?.pantsDataUrl, clothingAsset?.shirtDataUrl, rigReady])
 
   useEffect(() => {
     const s = stateRef.current
@@ -763,7 +769,8 @@ function WorkflowViewport({ animationResult, clothingAsset, accessories, envPart
       )}
 
       {!animationResult?.bvhPath &&
-        !clothingAsset?.resultDataUrl &&
+        !clothingAsset?.shirtDataUrl &&
+        !clothingAsset?.pantsDataUrl &&
         accessories.length === 0 &&
         envParts.length === 0 && (
         <div style={emptyStateStyle}>
@@ -794,6 +801,7 @@ function focusScene(state) {
   if (!state?.camera || !state?.orbit || !state?.rigScene) return
   const bounds = new THREE.Box3()
   bounds.expandByObject(state.rigScene)
+  if (state.clothingAvatar) bounds.expandByObject(state.clothingAvatar)
   for (const group of state.envMap?.values() || []) bounds.expandByObject(group)
   if (bounds.isEmpty()) return
 
@@ -805,32 +813,33 @@ function focusScene(state) {
   state.camera.lookAt(center)
 }
 
-function clearClothingOverlays(state) {
-  if (!state?.clothingOverlays?.length) {
-    state.clothingOverlays = []
-    return
-  }
-
-  for (const overlay of state.clothingOverlays) {
-    overlay.mesh.parent?.remove(overlay.mesh)
-    overlay.material.dispose()
-  }
-  state.clothingOverlays = []
+function clearClothingAvatar(state) {
+  if (!state) return
+  clearClassicClothingAvatar(state.clothingAvatar)
+  state.clothingAvatar = null
 }
 
-function isClothingTargetMesh(name, assetType) {
-  const normalized = normName(name)
-  if (!normalized) return false
+function setRigBodyVisible(state, visible) {
+  state?.rigScene?.traverse((obj) => {
+    if (obj?.isSkinnedMesh) obj.visible = visible
+  })
+}
 
-  const isTorso = normalized.includes('torso')
-  const isArm = normalized.includes('arm')
-  const isLeg = normalized.includes('leg') || normalized.includes('foot')
-
-  if ((assetType || 'shirt') === 'pants') {
-    return normalized.includes('lowertorso') || isLeg
-  }
-
-  return isTorso || isArm
+function loadTexture(dataUrl) {
+  if (!dataUrl) return Promise.resolve(null)
+  return new Promise((resolve, reject) => {
+    new THREE.TextureLoader().load(
+      dataUrl,
+      (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace
+        texture.flipY = false
+        texture.needsUpdate = true
+        resolve(texture)
+      },
+      undefined,
+      reject
+    )
+  })
 }
 
 function badgeStyle(color) {

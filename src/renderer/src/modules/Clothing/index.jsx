@@ -1,5 +1,6 @@
 /* eslint-disable react/prop-types */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import ClassicClothingPreview from './ClassicClothingPreview'
 
 const DEFAULT_WORKFLOW = {
   provider: 'replicate',
@@ -12,6 +13,11 @@ const DEFAULT_WORKFLOW = {
   templateDataUrl: null,
   resultPath: null,
   resultDataUrl: null,
+  assets: {
+    shirt: null,
+    pants: null,
+    outfit: null
+  },
   seed: '',
   lastPrompt: ''
 }
@@ -127,7 +133,7 @@ function buildPromptPack(workflow) {
 
   const designBrief = [
     `User clothing request: ${workflow.designPrompt || 'Create a clean Roblox classic clothing texture.'}`,
-    `Asset target: Roblox classic ${workflow.assetType}.`,
+    `Asset target: Roblox classic ${workflow.assetType === 'outfit' ? 'shirt and pants outfit' : workflow.assetType}.`,
     workflow.colorPalette ? `Color palette: ${workflow.colorPalette}` : null,
     workflow.materialNotes ? `Material notes: ${workflow.materialNotes}` : null,
     workflow.styleNotes ? `Style notes: ${workflow.styleNotes}` : null,
@@ -152,7 +158,7 @@ function buildPromptPack(workflow) {
     'Roblox Classic Clothing Prompt Pack',
     '',
     `Model: ${REPLICATE_MODEL}`,
-    `Asset type: ${workflow.assetType}`,
+    `Asset type: ${workflow.assetType === 'outfit' ? 'shirt and pants outfit' : workflow.assetType}`,
     workflow.colorPalette ? `Palette: ${workflow.colorPalette}` : null,
     workflow.materialNotes ? `Material notes: ${workflow.materialNotes}` : null,
     workflow.styleNotes ? `Style notes: ${workflow.styleNotes}` : null,
@@ -345,6 +351,35 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
   }, [providerWebConfig, providerWebConfigLoaded])
 
   const promptPack = useMemo(() => buildPromptPack(workflow), [workflow])
+  const clothingAssets = useMemo(() => {
+    const assets = {
+      shirt: null,
+      pants: null,
+      outfit: null,
+      ...(workflow.assets || {})
+    }
+    if (workflow.resultDataUrl && !assets[workflow.assetType]?.resultDataUrl) {
+      assets[workflow.assetType] = {
+        resultPath: workflow.resultPath,
+        resultDataUrl: workflow.resultDataUrl,
+        lastPrompt: workflow.lastPrompt
+      }
+    }
+    return assets
+  }, [workflow])
+  const activeAsset = clothingAssets[workflow.assetType] || {}
+  const previewShirtDataUrl =
+    clothingAssets.shirt?.resultDataUrl ||
+    clothingAssets.outfit?.resultDataUrl ||
+    activeAsset.resultDataUrl ||
+    workflow.resultDataUrl ||
+    null
+  const previewPantsDataUrl =
+    clothingAssets.pants?.resultDataUrl ||
+    clothingAssets.outfit?.resultDataUrl ||
+    activeAsset.resultDataUrl ||
+    workflow.resultDataUrl ||
+    null
 
   const updateWorkflow = useCallback((changes) => {
     setWorkflow((prev) => ({ ...prev, ...changes }))
@@ -509,17 +544,17 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
   }, [promptPack.exportText])
 
   const saveGeneratedTexture = useCallback(async () => {
-    if (!workflow.resultPath) return
+    if (!activeAsset.resultPath) return
     const filePath = await window.api.saveFile({
       title: 'Save Classic Clothing Texture',
       defaultPath: `roblox-${workflow.assetType}-texture.png`,
       filters: [{ name: 'PNG Images', extensions: ['png'] }]
     })
     if (!filePath) return
-    await window.api.copyFile({ src: workflow.resultPath, dest: filePath })
+    await window.api.copyFile({ src: activeAsset.resultPath, dest: filePath })
     setNotice('Generated texture saved.')
     window.api.openPath(filePath)
-  }, [workflow.assetType, workflow.resultPath])
+  }, [activeAsset.resultPath, workflow.assetType])
 
   const generateTexture = useCallback(async () => {
     if (!replicateToken.trim()) {
@@ -559,14 +594,23 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
     }
 
     const dataUrlResult = await window.api.readFileAsDataURL({ filePath: result.outputPath })
+    const nextAsset = {
+      resultPath: result.outputPath,
+      resultDataUrl: dataUrlResult.success ? dataUrlResult.dataUrl : null,
+      lastPrompt: promptPack.finalPrompt
+    }
     setProgress(null)
     updateWorkflow({
       resultPath: result.outputPath,
       resultDataUrl: dataUrlResult.success ? dataUrlResult.dataUrl : null,
-      lastPrompt: promptPack.finalPrompt
+      lastPrompt: promptPack.finalPrompt,
+      assets: {
+        ...(workflow.assets || {}),
+        [workflow.assetType]: nextAsset
+      }
     })
     setNotice('Classic clothing texture generated.')
-  }, [promptPack.finalPrompt, replicateToken, updateWorkflow, workflow.designPrompt, workflow.seed, workflow.templateDataUrl, workflow.templateImagePath])
+  }, [promptPack.finalPrompt, replicateToken, updateWorkflow, workflow.assets, workflow.assetType, workflow.designPrompt, workflow.seed, workflow.templateDataUrl, workflow.templateImagePath])
 
   const selectedProvider = PROVIDERS[workflow.provider] || PROVIDERS.replicate
   const currentProviderStatus =
@@ -795,7 +839,7 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
           <div style={{ ...styles.card, marginBottom: 14 }}>
             <label style={styles.label}>Asset Type</label>
             <div style={{ display: 'flex', gap: 8 }}>
-              {['shirt', 'pants'].map((type) => {
+              {['shirt', 'pants', 'outfit'].map((type) => {
                 const active = workflow.assetType === type
                 return (
                   <button
@@ -808,7 +852,7 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
                     }}
                     onClick={() => updateWorkflow({ assetType: type })}
                   >
-                    {type === 'shirt' ? 'Classic Shirt' : 'Classic Pants'}
+                    {type === 'shirt' ? 'Classic Shirt' : type === 'pants' ? 'Classic Pants' : 'Full Outfit'}
                   </button>
                 )
               })}
@@ -912,7 +956,7 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
               <button style={styles.button} onClick={copyPromptForProvider}>
                 Copy Prompt
               </button>
-              {workflow.resultPath && workflow.provider === 'replicate' && (
+              {activeAsset.resultPath && workflow.provider === 'replicate' && (
                 <button style={styles.button} onClick={saveGeneratedTexture}>
                   Save PNG
                 </button>
@@ -942,9 +986,9 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
               <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>
                 Generated Result
               </div>
-              {workflow.resultDataUrl ? (
+              {activeAsset.resultDataUrl ? (
                 <img
-                  src={workflow.resultDataUrl}
+                  src={activeAsset.resultDataUrl}
                   alt="Generated classic clothing texture"
                   style={{ width: '100%', borderRadius: 10, border: '1px solid #252a36' }}
                 />
@@ -953,6 +997,19 @@ export default function ClothingModule({ workflowState, setWorkflowState }) {
                   Your generated PNG will appear here after Replicate finishes.
                 </div>
               )}
+            </div>
+          </div>
+
+          <div style={{ ...styles.card, marginTop: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>
+              Character Preview
+            </div>
+            <ClassicClothingPreview
+              shirtDataUrl={previewShirtDataUrl}
+              pantsDataUrl={previewPantsDataUrl}
+            />
+            <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.6, marginTop: 10 }}>
+              This preview maps the generated template panels onto the bundled Roblox R15 rig so you can inspect the clothing before sending it to Playground.
             </div>
           </div>
         </div>

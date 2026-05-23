@@ -173,6 +173,12 @@ const MODELS = [
     label: '🔥 HY-Motion 1.0 Lite',
     desc: 'Smaller 460M model — faster generation, slightly lower quality.',
     badge: null
+  },
+  {
+    id: 'hymotion-zerogpu',
+    label: '🔥 HY-Motion 1.0 ZeroGPU',
+    desc: 'Runs on Hugging Face Spaces ZeroGPU queue — slower, no dedicated GPU required.',
+    badge: 'ZERO GPU'
   }
 ]
 
@@ -194,6 +200,13 @@ export default function TextToAnimation({ onProgress, onResult, onClear, result 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [focusTA, setFocusTA] = useState(false)
+  const isHyMotionModel = model === 'hymotion' || model === 'hymotion-lite' || model === 'hymotion-zerogpu'
+  const hyMotionModelLabel =
+    model === 'hymotion-lite'
+      ? 'HY-Motion 1.0 Lite'
+      : model === 'hymotion-zerogpu'
+        ? 'HY-Motion 1.0 ZeroGPU'
+        : 'HY-Motion 1.0'
 
   async function generate() {
     if (!prompt.trim()) return
@@ -353,7 +366,7 @@ export default function TextToAnimation({ onProgress, onResult, onClear, result 
 
         {error && <div style={{ ...S.errBox, marginBottom: 16 }}>{error}</div>}
 
-        {model === 'hymotion' || model === 'hymotion-lite' ? (
+        {isHyMotionModel ? (
           <div
             style={{
               background: 'rgba(124,58,237,0.06)',
@@ -366,13 +379,13 @@ export default function TextToAnimation({ onProgress, onResult, onClear, result 
               lineHeight: 1.7
             }}
           >
-            <strong style={{ color: '#c4b5fd' }}>
-              🔥 HY-Motion 1.0{model === 'hymotion-lite' ? ' Lite' : ''}
-            </strong>{' '}
+            <strong style={{ color: '#c4b5fd' }}>🔥 {hyMotionModelLabel}</strong>{' '}
             text-to-motion
             <br />
             <span style={{ color: '#555b6e' }}>
-              Tencent&apos;s motion model for Roblox-ready BVH export
+              {model === 'hymotion-zerogpu'
+                ? 'Tencent&apos;s motion model via Hugging Face Spaces ZeroGPU queue for Roblox-ready BVH export'
+                : 'Tencent&apos;s motion model for Roblox-ready BVH export'}
             </span>
           </div>
         ) : null}

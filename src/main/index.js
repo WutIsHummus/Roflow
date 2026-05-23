@@ -978,6 +978,28 @@ function normalizeTextToMotionError(err) {
   return message
 }
 
+function getHyMotionTarget(model) {
+  if (model === 'hymotion-lite') {
+    return {
+      spaceId: 'tencent/HY-Motion-1.0',
+      progressLabel: 'HY-Motion 1.0 Lite',
+      useLiteVariant: true
+    }
+  }
+  if (model === 'hymotion-zerogpu') {
+    return {
+      spaceId: 'tencent/HY-Motion-1.0',
+      progressLabel: 'HY-Motion 1.0 ZeroGPU',
+      useLiteVariant: true
+    }
+  }
+  return {
+    spaceId: 'tencent/HY-Motion-1.0',
+    progressLabel: 'HY-Motion 1.0',
+    useLiteVariant: false
+  }
+}
+
 ipcMain.handle('animation:textToMotion', async (event, { prompt, model, duration }) => {
   const send = (step, pct) => event.sender.send('animation:progress', { step, pct })
   try {
@@ -985,17 +1007,18 @@ ipcMain.handle('animation:textToMotion', async (event, { prompt, model, duration
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
 
     const { Client } = await import('@gradio/client')
+    const motionTarget = getHyMotionTarget(model)
 
-    send('Connecting to HY-Motion...', 10)
-    const client = await Client.connect('tencent/HY-Motion-1.0', { hf_token: undefined })
+    send(`Connecting to ${motionTarget.progressLabel}...`, 10)
+    const client = await Client.connect(motionTarget.spaceId, { hf_token: undefined })
 
-    send('Generating motion with HY-Motion 1.0...', 30)
+    send(`Generating motion with ${motionTarget.progressLabel}...`, 30)
     const result = await client.predict('/generate', {
       text: prompt,
       motion_length: duration,
       num_seeds: 1,
       // Lite mode uses a lighter checkpoint if the space supports it
-      ...(model === 'hymotion-lite' ? { model_variant: 'lite' } : {})
+      ...(motionTarget.useLiteVariant ? { model_variant: 'lite' } : {})
     })
 
     send('Downloading motion file...', 80)
