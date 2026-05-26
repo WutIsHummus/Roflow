@@ -120,10 +120,14 @@ export default function PartsList({
   assetRefreshState = 'idle',
   assetRefreshMessage = '',
   recentlyRemoved = null,
-  onUndoRemove
+  onUndoRemove,
+  tripoSessionConnected = true,
+  tripoSessionLoading = false,
+  tripoSessionLoginRequired = false
 }) {
   const [showAssets, setShowAssets] = useState(false)
   const quickParts = QUICK_PARTS[activeTab] || []
+  const canUseTripo = tripoSessionConnected && !tripoSessionLoading
 
   return (
     <div className="flex flex-col h-full bg-transparent">
@@ -145,7 +149,17 @@ export default function PartsList({
             ) && (
               <button
                 onClick={() => onGenerateAll?.()}
-                className="px-4 py-2.5 text-xs font-bold rounded-xl border border-white/[0.08] bg-white/[0.05] text-slate-200 hover:bg-white/[0.1] hover:border-white/[0.15] hover:text-white transition-all duration-200 hover:scale-[1.01] active:scale-[0.98] cursor-pointer backdrop-blur-md flex items-center gap-1.5"
+                disabled={!canUseTripo}
+                title={
+                  canUseTripo
+                    ? 'Generate all pending parts'
+                    : tripoSessionLoginRequired
+                      ? 'Connect your Tripo account first'
+                      : 'Check Tripo session first'
+                }
+                className={`px-4 py-2.5 text-xs font-bold rounded-xl border border-white/[0.08] bg-white/[0.05] text-slate-200 hover:bg-white/[0.1] hover:border-white/[0.15] hover:text-white transition-all duration-200 hover:scale-[1.01] active:scale-[0.98] cursor-pointer backdrop-blur-md flex items-center gap-1.5 ${
+                  !canUseTripo ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''
+                }`}
               >
                 <Sparkles size={13} className="shrink-0 text-slate-300" />
                 Generate All
@@ -201,6 +215,13 @@ export default function PartsList({
 
         {showTripoBrowser && (
           <div>
+            {!canUseTripo && (
+              <div className="mb-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[10px] text-amber-200/90 leading-relaxed">
+                {tripoSessionLoginRequired
+                  ? 'Tripo login required — use Connect in the Modeling header, then Sync My Assets.'
+                  : 'Tripo session not connected — check session in the Modeling header before syncing or generating.'}
+              </div>
+            )}
             <button
               onClick={() => setShowAssets((prev) => !prev)}
               className={`w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold rounded-xl border transition-all duration-200 cursor-pointer hover:scale-[1.01] ${
@@ -223,11 +244,14 @@ export default function PartsList({
                 <div className="flex gap-2 items-center mb-3">
                   <button
                     onClick={() => onRefreshAssets?.()}
-                    disabled={assetRefreshState === 'loading'}
+                    disabled={assetRefreshState === 'loading' || !canUseTripo}
+                    title={canUseTripo ? 'Sync Tripo My Assets' : 'Connect Tripo session first'}
                     className={`px-3.5 py-2 text-xs font-bold rounded-lg border transition-all duration-200 flex items-center gap-1.5 ${
                       assetRefreshState === 'loading'
                         ? 'bg-purple-900/10 border-purple-500/10 text-purple-400/50 cursor-wait'
-                        : 'bg-purple-500/10 border-purple-500/25 text-purple-300 hover:bg-purple-500/20 cursor-pointer'
+                        : !canUseTripo
+                          ? 'bg-purple-500/5 border-purple-500/10 text-purple-400/40 cursor-not-allowed'
+                          : 'bg-purple-500/10 border-purple-500/25 text-purple-300 hover:bg-purple-500/20 cursor-pointer'
                     }`}
                   >
                     <RefreshCw size={12} className={`shrink-0 ${assetRefreshState === 'loading' ? 'animate-spin' : ''}`} />
@@ -332,6 +356,8 @@ export default function PartsList({
               onRetopo={(faces) => onRetopo?.(part.id, faces)}
               onPartChange={(ch) => onPartChange(part.id, ch)}
               showAttachPoint={showAttachPoint}
+              tripoSessionConnected={canUseTripo}
+              tripoSessionLoginRequired={tripoSessionLoginRequired}
             />
           ))
         )}
@@ -399,7 +425,9 @@ function PartCard({
   onOptimize,
   onRetopo,
   onPartChange,
-  showAttachPoint
+  showAttachPoint,
+  tripoSessionConnected = true,
+  tripoSessionLoginRequired = false
 }) {
   const [optimizePresetIdx, setOptimizePresetIdx] = useState(1)
   const [retopoFaceIdx, setRetopoFaceIdx] = useState(1)
@@ -434,7 +462,13 @@ function PartCard({
   }
   const st = STATUS[part.status || 'pending']
   const busy = part.status === 'generating'
-  const canGen = (((part.prompt || '').trim().length > 0) || partHasReferenceImages(part)) && !busy
+  const canGen =
+    (((part.prompt || '').trim().length > 0) || partHasReferenceImages(part)) &&
+    !busy &&
+    tripoSessionConnected
+  const generateBlockedHint = tripoSessionLoginRequired
+    ? 'Connect Tripo account first'
+    : 'Check Tripo session first'
 
   return (
     <div 
@@ -598,6 +632,7 @@ function PartCard({
         <button
           onClick={onGenerate}
           disabled={!canGen}
+          title={!tripoSessionConnected && !busy ? generateBlockedHint : undefined}
           className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] ${
             busy 
               ? 'bg-white/[0.05] border border-white/[0.1] text-white/50 cursor-wait animate-pulse'

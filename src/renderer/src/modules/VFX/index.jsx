@@ -3,19 +3,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CONFIG_KEYS } from '../../../../shared/configKeys.js'
 import { useConfigKey } from '../../hooks/useConfigKey.js'
 import {
-  MAX_SEQUENCE_KEYPOINTS,
-  MIN_SEQUENCE_KEYPOINTS,
   buildRobloxSequenceExport,
   clamp,
-  colorSequenceGradientCss,
   migrateLayerSequences,
   normalizeColorKeypoints,
   normalizeSizeKeypoints,
-  normalizeTransparencyKeypoints,
-  numberSequenceGradientCss,
-  syncLegacyFieldsFromSequences
+  normalizeTransparencyKeypoints
 } from '../../../../shared/vfxSequenceUtils.js'
 import VfxPreview3D from './VfxPreview3D'
+import SequenceEditor from './SequenceEditor'
 import { RotateCcw, Download, Plus, Image, Video, Sparkles, Sliders, Play, Layers, Trash2, AlertCircle } from 'lucide-react'
 
 let nextReferenceId = 1
@@ -803,193 +799,30 @@ function LayerCheckField({ label, checked, onChange }) {
   )
 }
 
-function SequenceEditor({
-  label,
-  kind,
-  layer,
-  keypoints,
-  onChange,
-  valueMin = 0,
-  valueMax = 1,
-  valueStep = 0.05,
-  valueLabel = 'Value'
-}) {
-  const sorted = [...keypoints].sort((a, b) => a.time - b.time)
-  const field =
-    kind === 'color' ? 'colorKeypoints' : kind === 'size' ? 'sizeKeypoints' : 'transparencyKeypoints'
-
-  const setKeypoints = (nextKeypoints) => {
-    onChange(syncLegacyFieldsFromSequences({ ...layer, [field]: nextKeypoints }))
-  }
-
-  const handleTimeChange = (index, time) => {
-    const next = sorted.map((kp, i) =>
-      i === index ? { ...kp, time: clamp(Number(time) || 0, 0, 1) } : kp
-    )
-    setKeypoints(next)
-  }
-
-  const handleValueChange = (index, rawValue) => {
-    const next = sorted.map((kp, i) => {
-      if (i !== index) return kp
-      if (kind === 'color') return { ...kp, color: rawValue }
-      return { ...kp, value: clamp(Number(rawValue) || valueMin, valueMin, valueMax) }
-    })
-    setKeypoints(next)
-  }
-
-  const handleRemove = (index) => {
-    if (sorted.length <= MIN_SEQUENCE_KEYPOINTS) return
-    setKeypoints(sorted.filter((_, i) => i !== index))
-  }
-
-  const handleAdd = () => {
-    if (sorted.length >= MAX_SEQUENCE_KEYPOINTS) return
-    const gaps = []
-    for (let i = 0; i < sorted.length - 1; i += 1) {
-      gaps.push({ index: i, gap: sorted[i + 1].time - sorted[i].time })
-    }
-    gaps.sort((a, b) => b.gap - a.gap)
-    const insertAfter = gaps[0]?.index ?? sorted.length - 2
-    const a = sorted[insertAfter]
-    const b = sorted[insertAfter + 1]
-    const midTime = Number(((a.time + b.time) / 2).toFixed(3))
-    const newKp =
-      kind === 'color'
-        ? { time: midTime, color: a.color }
-        : { time: midTime, value: (a.value + b.value) / 2 }
-    const next = [...sorted]
-    next.splice(insertAfter + 1, 0, newKp)
-    setKeypoints(next)
-  }
-
-  const gradientStyle =
-    kind === 'color'
-      ? { background: colorSequenceGradientCss(sorted) }
-      : {
-          background: numberSequenceGradientCss(
-            sorted,
-            valueMin,
-            valueMax,
-            kind === 'transparency' ? '#94a3b8' : '#a78bfa'
-          )
-        }
-
+function RailTabs({ tabs, active, onChange }) {
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-        <span style={{ ...S.label, marginBottom: 0 }}>{label}</span>
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {tabs.map(({ id, label }) => (
         <button
+          key={id}
           type="button"
-          style={{ ...S.subtleButton, padding: '6px 10px', fontSize: 11 }}
-          onClick={handleAdd}
-          disabled={sorted.length >= MAX_SEQUENCE_KEYPOINTS}
+          onClick={() => onChange(id)}
+          style={{
+            flex: 1,
+            minWidth: 72,
+            padding: '6px 10px',
+            fontSize: 10,
+            fontWeight: 700,
+            borderRadius: 10,
+            cursor: 'pointer',
+            border: active === id ? '1px solid rgba(96,165,250,0.45)' : '1px solid rgba(255,255,255,0.08)',
+            background: active === id ? 'rgba(96,165,250,0.14)' : 'rgba(255,255,255,0.03)',
+            color: active === id ? '#93c5fd' : '#94a3b8'
+          }}
         >
-          Add Keypoint
+          {label}
         </button>
-      </div>
-      <div
-        style={{
-          height: 14,
-          borderRadius: 8,
-          border: '1px solid rgba(255,255,255,0.08)',
-          position: 'relative',
-          overflow: 'hidden',
-          ...gradientStyle
-        }}
-      >
-        {sorted.map((kp) => (
-          <div
-            key={`${kp.time}-${kp.color || kp.value}`}
-            title={`t=${kp.time}`}
-            style={{
-              position: 'absolute',
-              top: 2,
-              bottom: 2,
-              left: `${kp.time * 100}%`,
-              width: 3,
-              marginLeft: -1,
-              borderRadius: 2,
-              background: kind === 'color' ? '#fff' : '#eef0f6',
-              boxShadow: '0 0 4px rgba(0,0,0,0.45)'
-            }}
-          />
-        ))}
-      </div>
-      <div style={{ display: 'grid', gap: 6 }}>
-        {sorted.map((kp, index) => (
-          <div
-            key={`${kind}-${index}-${kp.time}`}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: kind === 'color' ? '72px 1fr 44px 32px' : '72px 1fr 32px',
-              gap: 8,
-              alignItems: 'end'
-            }}
-          >
-            <div>
-              <label style={{ ...S.label, fontSize: 9 }}>Time</label>
-              <input
-                style={{ ...S.input, padding: '7px 8px' }}
-                type="number"
-                min={0}
-                max={1}
-                step={0.01}
-                value={kp.time}
-                onChange={(event) => handleTimeChange(index, event.target.value)}
-              />
-            </div>
-            {kind === 'color' ? (
-              <div>
-                <label style={{ ...S.label, fontSize: 9 }}>Color</label>
-                <input
-                  style={{ ...S.input, padding: 4, height: 36 }}
-                  type="color"
-                  value={kp.color}
-                  onChange={(event) => handleValueChange(index, event.target.value)}
-                />
-              </div>
-            ) : (
-              <div>
-                <label style={{ ...S.label, fontSize: 9 }}>{valueLabel}</label>
-                <input
-                  style={{ ...S.input, padding: '7px 8px' }}
-                  type="number"
-                  min={valueMin}
-                  max={valueMax}
-                  step={valueStep}
-                  value={Number(kp.value.toFixed(3))}
-                  onChange={(event) => handleValueChange(index, event.target.value)}
-                />
-              </div>
-            )}
-            {kind === 'color' ? (
-              <div
-                style={{
-                  height: 36,
-                  borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  background: kp.color
-                }}
-              />
-            ) : null}
-            <button
-              type="button"
-              style={{
-                ...S.subtleButton,
-                padding: '7px 0',
-                fontSize: 14,
-                opacity: sorted.length <= MIN_SEQUENCE_KEYPOINTS ? 0.35 : 1
-              }}
-              onClick={() => handleRemove(index)}
-              disabled={sorted.length <= MIN_SEQUENCE_KEYPOINTS}
-              title="Remove keypoint"
-            >
-              ×
-            </button>
-          </div>
-        ))}
-      </div>
+      ))}
     </div>
   )
 }
@@ -1009,6 +842,8 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
   const [busy, setBusy] = useState('')
   const [notice, setNotice] = useState('')
   const [progress, setProgress] = useState(null)
+  const [leftRailTab, setLeftRailTab] = useState('brief')
+  const [rightRailTab, setRightRailTab] = useState('export')
   const deepseekApiKey = useConfigKey(CONFIG_KEYS.DEEPSEEK_API_KEY)
   const [elevenLabsWebConfig, setElevenLabsWebConfig] = useState(DEFAULT_ELEVENLABS_WEB_CONFIG)
 
@@ -1029,6 +864,18 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    if (workflow.sourceMode !== 'niagara-rebuild' && leftRailTab === 'niagara') {
+      setLeftRailTab('brief')
+    }
+  }, [workflow.sourceMode, leftRailTab])
+
+  useEffect(() => {
+    if (!workflow.generatedNotes && rightRailTab === 'notes') {
+      setRightRailTab('export')
+    }
+  }, [workflow.generatedNotes, rightRailTab])
 
   useEffect(() => {
     if (!setWorkflowState) return
@@ -1346,15 +1193,16 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
     setNotice(`Generated ${result.logic.layers.length} layers with ${result.model || workflow.deepseekModel}.`)
   }, [deepseekApiKey, workflow])
 
-  const exportPackage = useCallback(async () => {
-    const folderPath = await window.api.saveFolder({ title: 'Export VFX Preset' })
+  const exportPackage = useCallback(async ({ installPlugin = false } = {}) => {
+    const folderPath = await window.api.saveFolder({ title: 'Export VFX Studio Bundle' })
     if (!folderPath) return
 
     const result = await window.api.exportVfxPackage({
       folderPath,
       effectName: workflow.effectName,
       preset,
-      workflowText
+      workflowText,
+      installPlugin
     })
 
     if (!result?.success) {
@@ -1362,11 +1210,31 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
       return
     }
 
-    setNotice('VFX preset exported.')
-    if (result.files?.presetPath) {
-      window.api.openPath(result.files.presetPath)
+    const textureCount = result.files?.textures?.length || 0
+    const pluginNote = result.pluginInstall
+      ? ' Studio plugin installed — restart Roblox Studio if it was open.'
+      : ''
+    setNotice(
+      `Studio bundle exported (${textureCount} texture${textureCount === 1 ? '' : 's'}).` +
+        pluginNote +
+        ' Open manifest.json in the RoFlow VFX plugin.'
+    )
+    if (result.files?.manifestPath) {
+      window.api.openPath(result.files.manifestPath)
     }
   }, [preset, workflow.effectName, workflowText])
+
+  const installStudioPlugin = useCallback(async () => {
+    const result = await window.api.vfxInstallStudioPlugin()
+    if (!result?.success) {
+      setNotice(result?.error || 'Could not install the Studio plugin.')
+      return
+    }
+    setNotice('RoFlow VFX plugin installed. Restart Roblox Studio, then use Import RoFlow Bundle.')
+    if (result.pluginEntry) {
+      window.api.openPath(result.destDir)
+    }
+  }, [])
 
   const generateRecipe = useCallback(async () => {
     if (!deepseekApiKey.trim()) {
@@ -1469,9 +1337,6 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
             <button style={S.subtleButton} onClick={resetStarterLayers}>
               <RotateCcw size={14} /> Reset Layers
             </button>
-            <button style={S.button} onClick={exportPackage}>
-              <Download size={14} /> Export Preset
-            </button>
           </div>
         </div>
       </div>
@@ -1479,6 +1344,19 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
       <div style={S.body}>
         <aside style={S.rail}>
           <div style={{ display: 'grid', gap: 14 }}>
+            <RailTabs
+              active={leftRailTab}
+              onChange={setLeftRailTab}
+              tabs={[
+                { id: 'brief', label: 'Brief' },
+                ...(workflow.sourceMode === 'niagara-rebuild'
+                  ? [{ id: 'niagara', label: 'Niagara' }]
+                  : []),
+                { id: 'references', label: 'References' }
+              ]}
+            />
+
+            {leftRailTab === 'brief' && (
             <div style={S.card}>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 12 }}>Effect Brief</div>
               <div style={{ display: 'grid', gap: 12 }}>
@@ -1607,8 +1485,9 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
                 )}
               </div>
             </div>
+            )}
 
-            {workflow.sourceMode === 'niagara-rebuild' && (
+            {leftRailTab === 'niagara' && workflow.sourceMode === 'niagara-rebuild' && (
               <div style={S.card}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>
                   Niagara Reference
@@ -1654,6 +1533,7 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
               </div>
             )}
 
+            {leftRailTab === 'references' && (
             <div style={S.card}>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>References</div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -1697,6 +1577,7 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
                 </div>
               )}
             </div>
+            )}
           </div>
         </aside>
 
@@ -2114,25 +1995,38 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
 
                     <LayerSection title="Sequences" defaultOpen>
                       <SequenceEditor
-                        label="Color Sequence (ColorSequence)"
+                        label="Color over lifetime"
+                        hint="Roblox ColorSequence · t=0 birth, t=1 end of particle life"
                         kind="color"
                         layer={activeLayer}
                         keypoints={normalizeColorKeypoints(activeLayer.colorKeypoints, activeLayer)}
                         onChange={(changes) => updateLayer(activeLayer.id, changes)}
                       />
+                      {(activeLayer.robloxClass || 'ParticleEmitter') !== 'Beam' && (
+                        <SequenceEditor
+                          label={
+                            activeLayer.robloxClass === 'Trail'
+                              ? 'Width scale over trail'
+                              : 'Size over lifetime'
+                          }
+                          hint={
+                            activeLayer.robloxClass === 'Trail'
+                              ? 'Roblox Trail WidthScale NumberSequence'
+                              : 'Roblox Size NumberSequence (studs)'
+                          }
+                          kind="size"
+                          layer={activeLayer}
+                          keypoints={normalizeSizeKeypoints(activeLayer.sizeKeypoints, activeLayer)}
+                          onChange={(changes) => updateLayer(activeLayer.id, changes)}
+                          valueMin={0.01}
+                          valueMax={6}
+                          valueStep={0.05}
+                          valueLabel="Size (studs)"
+                        />
+                      )}
                       <SequenceEditor
-                        label="Size Sequence (NumberSequence)"
-                        kind="size"
-                        layer={activeLayer}
-                        keypoints={normalizeSizeKeypoints(activeLayer.sizeKeypoints, activeLayer)}
-                        onChange={(changes) => updateLayer(activeLayer.id, changes)}
-                        valueMin={0.01}
-                        valueMax={6}
-                        valueStep={0.05}
-                        valueLabel="Size (studs)"
-                      />
-                      <SequenceEditor
-                        label="Transparency Sequence (NumberSequence)"
+                        label="Transparency over lifetime"
+                        hint="0 = opaque, 1 = invisible · Roblox Transparency NumberSequence"
                         kind="transparency"
                         layer={activeLayer}
                         keypoints={normalizeTransparencyKeypoints(
@@ -2231,9 +2125,33 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
 
         <aside style={S.pack}>
           <div style={{ display: 'grid', gap: 14 }}>
+            <RailTabs
+              active={rightRailTab}
+              onChange={setRightRailTab}
+              tabs={[
+                { id: 'export', label: 'Export' },
+                { id: 'json', label: 'JSON' },
+                ...(workflow.generatedNotes ? [{ id: 'notes', label: 'AI Notes' }] : []),
+                { id: 'status', label: 'Status' }
+              ]}
+            />
+
+            {rightRailTab === 'export' && (
             <div style={S.card}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>Export</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>Studio Export</div>
+              <div style={{ fontSize: 12, color: '#8b95a8', lineHeight: 1.55, marginBottom: 10 }}>
+                Export a bundle for the RoFlow VFX Studio plugin. It uploads textures to Roblox and builds particle layers in Workspace.
+              </div>
               <div style={{ display: 'grid', gap: 10 }}>
+                <button style={S.button} onClick={() => exportPackage({ installPlugin: true })}>
+                  <Download size={14} /> Export Studio Bundle
+                </button>
+                <button style={S.subtleButton} onClick={() => exportPackage()}>
+                  Export Bundle Only
+                </button>
+                <button style={S.subtleButton} onClick={installStudioPlugin}>
+                  Install Studio Plugin
+                </button>
                 <button style={S.subtleButton} onClick={() => copyText(JSON.stringify(preset, null, 2), 'Preset JSON')}>
                   Copy Preset JSON
                 </button>
@@ -2242,8 +2160,9 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
                 </button>
               </div>
             </div>
+            )}
 
-            {workflow.generatedNotes && (
+            {rightRailTab === 'notes' && workflow.generatedNotes && (
               <div style={S.card}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>AI Notes</div>
                 <div style={{ fontSize: 12, color: '#c7d0e2', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
@@ -2252,6 +2171,7 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
               </div>
             )}
 
+            {rightRailTab === 'json' && (
             <div style={S.card}>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>Preset JSON</div>
               <pre
@@ -2273,13 +2193,16 @@ export default function VFXModule({ workflowState, setWorkflowState }) {
                 {JSON.stringify(preset, null, 2)}
               </pre>
             </div>
+            )}
 
+            {rightRailTab === 'status' && (
             <div style={S.card}>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 8 }}>Status</div>
               <div style={{ fontSize: 12, color: notice ? '#bfdbfe' : '#6d778c', lineHeight: 1.6 }}>
-                {notice || 'Describe the effect, generate particle logic, then export the preset.'}
+                {notice || 'Describe the effect, generate particle logic, export a Studio bundle, then import it with the RoFlow VFX plugin.'}
               </div>
             </div>
+            )}
           </div>
         </aside>
       </div>

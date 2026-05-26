@@ -1,5 +1,5 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, session, clipboard } from 'electron'
-import { basename, extname, join } from 'path'
+import { app, shell, BrowserWindow, ipcMain, dialog, session, clipboard, net } from 'electron'
+import { basename, dirname, extname, join } from 'path'
 import { spawn } from 'child_process'
 import {
   existsSync,
@@ -7,6 +7,7 @@ import {
   readFileSync,
   writeFileSync,
   copyFileSync,
+  cpSync,
   readdirSync,
   statSync
 } from 'fs'
@@ -16,6 +17,7 @@ import {
   buildRobloxVfxUserMessage,
   normalizeParticleLogicPayload
 } from './vfxRobloxPrompt.js'
+import { buildBundleReadme, writeStudioBundle } from '../shared/vfxStudioBundle.js'
 
 let mainWindow = null
 const TRIPO_WEB_PARTITION = 'persist:tripo-web'
@@ -134,6 +136,40 @@ function getPersistentModelLibraryDir() {
 
 function ensureDir(dirPath) {
   if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true })
+}
+
+function getRoflowVfxPluginSourceDir() {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'roblox-plugin', 'RoflowVFX')
+  }
+  return join(app.getAppPath(), 'plugins', 'roblox', 'RoflowVFX')
+}
+
+function getRobloxPluginsDir() {
+  const localAppData = process.env.LOCALAPPDATA || join(app.getPath('home'), 'AppData', 'Local')
+  return join(localAppData, 'Roblox', 'Plugins')
+}
+
+function installRoflowVfxPlugin() {
+  const sourceDir = getRoflowVfxPluginSourceDir()
+  if (!existsSync(sourceDir)) {
+    throw new Error(`RoFlow VFX plugin source not found at ${sourceDir}`)
+  }
+
+  const pluginEntry = join(sourceDir, 'RoflowVFX.plugin.lua')
+  if (!existsSync(pluginEntry)) {
+    throw new Error(`Missing plugin entry script: ${pluginEntry}`)
+  }
+
+  const destDir = join(getRobloxPluginsDir(), 'RoflowVFX')
+  ensureDir(destDir)
+  cpSync(sourceDir, destDir, { recursive: true, force: true })
+
+  return {
+    sourceDir,
+    destDir,
+    pluginEntry: join(destDir, 'RoflowVFX.plugin.lua')
+  }
 }
 
 function sanitizeFileStem(value) {
@@ -620,11 +656,91 @@ function migrateTripoWebConfig(cfg) {
     }
   }
 
+  if (!next.tripoDownloadFormat || !['glb', 'fbx', 'obj', 'stl'].includes(next.tripoDownloadFormat)) {
+    next.tripoDownloadFormat = 'glb'
+    changed = true
+  }
+
   return { cfg: next, changed }
 }
 
 function getProviderWebSession(partition) {
   return session.fromPartition(partition)
+}
+
+function tripoInpageHelpers() {
+  return `
+      const queryAllDeep = (selector, root = document) => {
+        const results = []
+        const seen = new Set()
+        const walk = (node) => {
+          if (!node?.querySelectorAll) return
+          for (const el of node.querySelectorAll(selector)) {
+            if (!seen.has(el)) {
+              seen.add(el)
+              results.push(el)
+            }
+          }
+          for (const el of node.querySelectorAll('*')) {
+            if (el.shadowRoot) walk(el.shadowRoot)
+          }
+        }
+        walk(root)
+        return results
+      }
+      const queryDeep = (selector, root = document) => queryAllDeep(selector, root)[0] || null
+      const visible = (el) => {
+        if (!el) return false
+        const style = window.getComputedStyle(el)
+        const rect = el.getBoundingClientRect()
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0 && rect.width > 4 && rect.height > 4
+      }
+      const textOf = (el) =>
+        (el?.innerText || el?.textContent || el?.getAttribute?.('aria-label') || el?.placeholder || '')
+          .replace(/\\s+/g, ' ')
+          .trim()
+      const dismissTripoOverlays = () => {
+        let dismissed = 0
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }))
+        for (const btn of queryAllDeep('button,[role="button"],a')) {
+          if (!visible(btn)) continue
+          const label = textOf(btn)
+          if (/^(close|dismiss|not now|skip|maybe later|×|✕)$/i.test(label)) {
+            btn.click()
+            dismissed++
+          }
+        }
+        return dismissed
+      }
+  `
+}
+
+async function openTripoLoginWindow(baseUrl) {
+  const loginLandingUrl = normalizeExternalUrl(
+    DEFAULT_TRIPO_WEB_GENERATE_URL,
+    normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL)
+  )
+  const win = await createTripoWebWindow({
+    url: loginLandingUrl,
+    show: true,
+    title: 'Connect Tripo Account'
+  })
+  await wait(2500)
+  await win.webContents.executeJavaScript(`
+    (() => {
+      ${tripoInpageHelpers()}
+      dismissTripoOverlays()
+      const loginButton = queryAllDeep('button,a,[role="button"]')
+        .filter(visible)
+        .find((el) => /sign up\\/log in|^log in$|^sign in$/i.test(textOf(el)))
+      if (loginButton) {
+        loginButton.click()
+        return { clicked: true, label: textOf(loginButton) }
+      }
+      return { clicked: false }
+    })()
+  `)
+  return win
 }
 
 async function createProviderWebWindow({
@@ -690,45 +806,50 @@ async function inspectProviderWebSession({
   })
 
   try {
-    await wait(2500)
+    await wait(3500)
     const snapshot = await win.webContents.executeJavaScript(`
       (() => {
-        const visible = (el) => {
-          if (!el) return false
-          const style = window.getComputedStyle(el)
-          const rect = el.getBoundingClientRect()
-          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
-        }
-        const promptCandidates = Array.from(
-          document.querySelectorAll('textarea,[contenteditable="true"],input[type="text"],input:not([type])')
-        ).filter(visible)
-        const buttonTexts = Array.from(document.querySelectorAll('button,a,[role="button"]'))
+        ${tripoInpageHelpers()}
+        dismissTripoOverlays()
+        const promptCandidates = queryAllDeep('textarea,[contenteditable="true"],input[type="text"],input:not([type])')
           .filter(visible)
-          .map((el) => (el.innerText || el.textContent || '').trim())
+          .filter((el) => {
+            const hint = [el.placeholder, el.getAttribute('aria-label'), el.name, textOf(el.parentElement)]
+              .filter(Boolean)
+              .join(' ')
+            return /ask anything|prompt|describe|what|3d|model|text|image|upload|type/i.test(hint) || el.tagName === 'TEXTAREA'
+          })
+        const buttonTexts = queryAllDeep('button,a,[role="button"]')
+          .filter(visible)
+          .map((el) => textOf(el))
           .filter(Boolean)
-          .slice(0, 40)
-        const bodyText = (document.body?.innerText || '').slice(0, 2000)
-        const passwordInputs = document.querySelectorAll('input[type="password"]').length
+          .slice(0, 60)
+        const bodyText = (document.body?.innerText || '').slice(0, 3000)
+        const passwordInputs = queryAllDeep('input[type="password"]').length
+        const path = location.pathname.replace(/\\/$/, '').toLowerCase()
+        const onWorkspacePage = /^\\/workspace(\\/|$)/.test(path) || path === '/home'
         return {
           href: location.href,
           title: document.title,
           promptCandidates: promptCandidates.length,
           passwordInputs,
           buttonTexts,
-          bodyText
+          bodyText,
+          onWorkspacePage
         }
       })()
     `)
 
     const loginDetected =
       snapshot.passwordInputs > 0 ||
-      /log in|login|sign in|continue with google|continue with microsoft|continue with apple/i.test(
+      /sign up\/log in|log in|login|sign in|continue with google|continue with microsoft|continue with apple/i.test(
         snapshot.bodyText
       )
 
     const connected =
       !loginDetected &&
-      (snapshot.promptCandidates > 0 ||
+      (snapshot.onWorkspacePage ||
+        snapshot.promptCandidates > 0 ||
         snapshot.buttonTexts.some((text) => readyPattern.test(text)))
 
     return {
@@ -752,8 +873,89 @@ async function inspectTripoWebSession(baseUrl, generateUrl) {
     workspaceUrl: generateUrl || DEFAULT_TRIPO_WEB_GENERATE_URL,
     title: 'Tripo Session Check',
     readyPattern:
-      /generate model|ask anything|workspace\/generate|hd model|smart mesh|text to 3d|image to 3d/i
+      /generate model|ask anything|workspace|hd model|smart mesh|text to 3d|image to 3d|best quality|create|multiview|upload image|new model/i
   })
+}
+
+async function inspectTripoAssetsSession(baseUrl) {
+  const assetsUrl = getTripoHistoryUrlCandidates(baseUrl)[0]
+  const sessionCookies = await getProviderWebSession(TRIPO_WEB_PARTITION).cookies.get({})
+  const win = await createTripoWebWindow({
+    url: assetsUrl,
+    show: false,
+    title: 'Tripo Assets Session Check'
+  })
+
+  try {
+    await wait(4000)
+    const snapshot = await win.webContents.executeJavaScript(`
+      (() => {
+        ${tripoInpageHelpers()}
+        dismissTripoOverlays()
+        const bodyText = (document.body?.innerText || '').slice(0, 4000)
+        const passwordInputs = queryAllDeep('input[type="password"]').length
+        const assetPath = location.pathname.replace(/\\/$/, '').toLowerCase()
+        const onAssetsPage = assetPath === '/assets' || assetPath.endsWith('/assets')
+        const myAssetsTab = queryAllDeep('button,[role="tab"],a,[role="link"]')
+          .filter(visible)
+          .some((el) => /^My Assets$/i.test(textOf(el)))
+        const assetCards = queryAllDeep('a[href*="/3d-model/"], a[href*="/project/"], a[href*="/asset/"], a[href*="/model/"], img[src*="tripo"], [class*="asset"], [class*="model-card"]')
+          .length
+        return {
+          href: location.href,
+          title: document.title,
+          passwordInputs,
+          bodyText,
+          onAssetsPage,
+          myAssetsTab,
+          assetCards
+        }
+      })()
+    `)
+
+    const loginDetected =
+      snapshot.passwordInputs > 0 ||
+      /sign up\/log in|log in|login|sign in|continue with google|continue with microsoft|continue with apple/i.test(
+        snapshot.bodyText
+      )
+
+    const connected =
+      !loginDetected &&
+      snapshot.onAssetsPage &&
+      (snapshot.myAssetsTab || snapshot.assetCards > 0 || /you have no assets at the moment/i.test(snapshot.bodyText))
+
+    return {
+      success: true,
+      connected,
+      loginDetected,
+      cookieCount: sessionCookies.length,
+      url: snapshot.href,
+      title: snapshot.title,
+      assetCards: snapshot.assetCards
+    }
+  } finally {
+    win.destroy()
+  }
+}
+
+async function inspectTripoWebSessionForSync(baseUrl, generateUrl) {
+  const generateStatus = await inspectTripoWebSession(baseUrl, generateUrl)
+  if (generateStatus.connected) return generateStatus
+  const assetsStatus = await inspectTripoAssetsSession(baseUrl)
+  if (assetsStatus.connected) {
+    return {
+      ...generateStatus,
+      connected: true,
+      loginDetected: false,
+      url: assetsStatus.url || generateStatus.url,
+      title: assetsStatus.title || generateStatus.title
+    }
+  }
+  return {
+    ...generateStatus,
+    connected: false,
+    loginDetected: generateStatus.loginDetected || assetsStatus.loginDetected
+  }
 }
 
 async function openTripoStudioGenerationPanel(win) {
@@ -811,39 +1013,31 @@ async function navigateToTripoGenerateSurface(win, baseUrl, generateUrl) {
 
     const found = await win.webContents.executeJavaScript(`
       (() => {
-        const visible = (el) => {
-          if (!el) return false
-          const style = window.getComputedStyle(el)
-          const rect = el.getBoundingClientRect()
-          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
-        }
-        const textOf = (el) => (el?.innerText || el?.textContent || el?.getAttribute('aria-label') || '').trim()
+        ${tripoInpageHelpers()}
+        dismissTripoOverlays()
 
-        const promptCandidates = Array.from(
-          document.querySelectorAll('textarea,input[type="text"],[contenteditable="true"],input:not([type])')
-        )
+        const promptCandidates = queryAllDeep('textarea,input[type="text"],[contenteditable="true"],input:not([type])')
           .filter(visible)
           .filter((el) => {
-            if (el.readOnly) return false
             const hint = [el.placeholder, el.getAttribute('aria-label'), el.name, textOf(el.parentElement)]
               .filter(Boolean)
               .join(' ')
             return /ask anything|prompt|describe|what|3d|model|text/i.test(hint) || el.tagName === 'TEXTAREA'
           })
 
-        const submitButton = Array.from(document.querySelectorAll('button,[role="button"]'))
+        const submitButton = queryAllDeep('button,[role="button"]')
           .filter(visible)
           .find((el) => /^Generate Model(\\b|\\s|$|\\d)/i.test(textOf(el)))
 
         const onGeneratePage =
           /\\/workspace\\/generate/i.test(location.pathname) ||
-          !!document.querySelector('h1,h2,h3')?.innerText?.match(/generate model/i)
+          !!queryDeep('h1,h2,h3')?.innerText?.match(/generate model/i)
 
         if ((promptCandidates.length > 0 || submitButton) && (onGeneratePage || submitButton)) {
-          return { found: true, url: location.href, title: document.title }
+          return { found: true, url: location.href, title: document.title, promptCandidates: promptCandidates.length }
         }
 
-        return { found: false, url: location.href, title: document.title }
+        return { found: false, url: location.href, title: document.title, promptCandidates: promptCandidates.length }
       })()
     `)
 
@@ -857,6 +1051,15 @@ async function navigateToTripoGenerateSurface(win, baseUrl, generateUrl) {
   }
 }
 
+function isTripoMyAssetsListUrl(url) {
+  try {
+    const path = new URL(url).pathname.replace(/\/$/, '').toLowerCase()
+    return path === '/assets' || path.endsWith('/assets')
+  } catch {
+    return false
+  }
+}
+
 function getTripoHistoryUrlCandidates(baseUrl) {
   const normalizedBaseUrl = normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL).replace(/\/$/, '')
   const lastHistoryUrl = normalizeExternalUrl(
@@ -864,19 +1067,12 @@ function getTripoHistoryUrlCandidates(baseUrl) {
     TRIPO_STUDIO_ASSETS_URL
   ).replace(/\/$/, '')
 
-  const isMyAssetsUrl = (url) => {
-    try {
-      return new URL(url).pathname.replace(/\/$/, '').endsWith('/assets')
-    } catch {
-      return false
-    }
-  }
-
   return Array.from(
     new Set([
       TRIPO_STUDIO_ASSETS_URL,
       `${normalizedBaseUrl}/assets`,
-      isMyAssetsUrl(lastHistoryUrl) && !isTripoGalleryUrl(lastHistoryUrl) ? lastHistoryUrl : null
+      isTripoMyAssetsListUrl(lastHistoryUrl) && !isTripoGalleryUrl(lastHistoryUrl) ? lastHistoryUrl : null,
+      `${normalizedBaseUrl}/app/assets`
     ].filter(Boolean))
   )
 }
@@ -884,14 +1080,8 @@ function getTripoHistoryUrlCandidates(baseUrl) {
 async function ensureTripoMyAssetsTab(win) {
   return win.webContents.executeJavaScript(`
     (() => {
-      const visible = (el) => {
-        if (!el) return false
-        const style = window.getComputedStyle(el)
-        const rect = el.getBoundingClientRect()
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
-      }
-      const textOf = (el) => (el?.innerText || el?.textContent || '').trim()
-      const myAssets = Array.from(document.querySelectorAll('button,[role="tab"]'))
+      ${tripoInpageHelpers()}
+      const myAssets = queryAllDeep('button,[role="tab"]')
         .filter(visible)
         .find((el) => /^My Assets$/i.test(textOf(el)))
       if (myAssets) {
@@ -911,6 +1101,156 @@ function buildTripoDetailUrlFromId(id) {
     return `https://studio.tripo3d.ai/3d-model/${value}`
   }
   return ''
+}
+
+function findTripoModelDownloadUrlsInPayload(data, results = [], seen = new Set()) {
+  if (data == null) return results
+
+  if (typeof data === 'string') {
+    const value = data.trim()
+    if (
+      value &&
+      /\.(glb|gltf|fbx|obj|stl)(\?|$)/i.test(value) &&
+      /https?:\/\//i.test(value) &&
+      !seen.has(value)
+    ) {
+      seen.add(value)
+      results.push(value)
+    }
+    return results
+  }
+
+  if (Array.isArray(data)) {
+    for (const item of data) findTripoModelDownloadUrlsInPayload(item, results, seen)
+    return results
+  }
+
+  if (typeof data === 'object') {
+    for (const value of Object.values(data)) findTripoModelDownloadUrlsInPayload(value, results, seen)
+  }
+
+  return results
+}
+
+function parseTripoModelUrlsFromNetworkPayloads(payloads = []) {
+  const urls = []
+  const seen = new Set()
+  for (const entry of payloads) {
+    for (const url of findTripoModelDownloadUrlsInPayload(entry.data)) {
+      if (!seen.has(url)) {
+        seen.add(url)
+        urls.push(url)
+      }
+    }
+  }
+  return urls
+}
+
+function resolveTripoImportUrls({ tripoAssetId = null, detailUrl = '', downloadUrl = '' } = {}) {
+  const normalizedId = normalizeTripoAssetId(tripoAssetId || detailUrl || downloadUrl)
+  const resolvedDetail =
+    detailUrl ||
+    buildTripoDetailUrlFromId(normalizedId) ||
+    buildTripoDetailUrlFromId(tripoAssetId) ||
+    ''
+  const resolvedDownload = downloadUrl || ''
+  return {
+    tripoAssetId: normalizedId || normalizeTripoAssetId(resolvedDetail || resolvedDownload),
+    detailUrl: resolvedDetail,
+    downloadUrl: resolvedDownload
+  }
+}
+
+async function downloadTripoFileViaSession(url, destPath) {
+  const normalizedUrl = normalizeExternalUrl(url)
+  const ses = getProviderWebSession(TRIPO_WEB_PARTITION)
+  const response = await net.fetch(normalizedUrl, { session: ses })
+  if (!response.ok) {
+    throw new Error(`Download failed (${response.status})`)
+  }
+  ensureDir(dirname(destPath))
+  const buffer = Buffer.from(await response.arrayBuffer())
+  writeFileSync(destPath, buffer)
+  return destPath
+}
+
+async function tryDirectTripoDownloads(urls, outDir, preferredExt = 'glb') {
+  const candidates = (urls || []).filter((url) => url && /\.(glb|gltf|fbx|obj|stl)(\?|$)/i.test(url))
+  for (const url of candidates) {
+    try {
+      const ext = extname(String(url).split('?')[0]) || `.${preferredExt}`
+      const destPath = join(outDir, `${Date.now()}_tripo${ext}`)
+      await downloadTripoFileViaSession(url, destPath)
+      return destPath
+    } catch (err) {
+      console.warn('[tripo-import] Direct download failed:', url, err.message)
+    }
+  }
+  return null
+}
+
+async function waitForTripoGenerationComplete(win, timeoutMs = 300000) {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const state = await win.webContents.executeJavaScript(`
+      (() => {
+        ${tripoInpageHelpers()}
+        dismissTripoOverlays()
+        const bodyText = (document.body?.innerText || '').slice(0, 5000)
+        const generating = /generating|processing|queued|in progress|creating your model|please wait/i.test(bodyText)
+        const failed = /generation failed|task failed|something went wrong|error occurred/i.test(bodyText)
+        const downloadBtn = queryAllDeep('button,a,[role="button"]')
+          .filter(visible)
+          .find((el) => /download|export|save model|get model|\\bglb\\b/i.test(textOf(el)))
+        const complete =
+          !!downloadBtn ||
+          (/generation complete|model ready|your model is ready|view model|regenerate/i.test(bodyText) &&
+            !generating)
+        return {
+          generating,
+          complete,
+          failed,
+          downloadBtn: downloadBtn ? textOf(downloadBtn) : '',
+          url: location.href
+        }
+      })()
+    `)
+
+    if (state.failed) {
+      return { ready: false, failed: true, ...state }
+    }
+    if (state.complete && !state.generating) {
+      return { ready: true, ...state }
+    }
+
+    await wait(3000)
+  }
+
+  return { ready: false, timedOut: true }
+}
+
+async function importTripoModelViaBrowser(win, outDir, { downloadUrl = '', preferredFormat = 'glb', timeoutMs = 120000 } = {}) {
+  const downloadPromise = captureTripoWebDownload(win, outDir, timeoutMs)
+
+  if (downloadUrl && /\.(glb|gltf|fbx|obj|stl)(\?|$)/i.test(downloadUrl)) {
+    win.webContents.downloadURL(downloadUrl)
+  } else {
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const action = await triggerTripoWebDownload(win, preferredFormat)
+      if (action.action === 'downloadURL' && action.url) {
+        win.webContents.downloadURL(action.url)
+        break
+      }
+      if (action.action === 'clicked' || action.action === 'format') {
+        await wait(1500)
+      } else {
+        await wait(2000)
+      }
+    }
+  }
+
+  return downloadPromise
 }
 
 function extractTripoAssetsFromApiPayload(data, results = [], seen = new Set()) {
@@ -960,13 +1300,15 @@ function extractTripoAssetsFromApiPayload(data, results = [], seen = new Set()) 
     const key = String(id)
     if (!seen.has(key)) {
       seen.add(key)
+      const nestedDownloads = findTripoModelDownloadUrlsInPayload(data)
       results.push({
         id: key,
         name: name || 'Untitled Tripo Asset',
         prompt: typeof data.prompt === 'string' ? data.prompt : '',
         previewUrl: typeof previewUrl === 'string' ? previewUrl : '',
         detailUrl: typeof detailUrl === 'string' ? detailUrl : buildTripoDetailUrlFromId(id),
-        downloadUrl: typeof downloadUrl === 'string' ? downloadUrl : '',
+        downloadUrl:
+          (typeof downloadUrl === 'string' && downloadUrl) || nestedDownloads[0] || '',
         actionTexts: []
       })
     }
@@ -986,10 +1328,18 @@ function attachTripoAssetsNetworkCapture(win) {
     if (method !== 'Network.responseReceived') return
     const responseUrl = params.response?.url || ''
     if (!/tripo3d\.ai/i.test(responseUrl)) return
-    if (!params.response.mimeType?.includes('json')) return
-    if (!/\/api\/|assets|projects|models|tasks|history|library|workspace|generation/i.test(responseUrl)) {
-      return
-    }
+
+    const mimeType = params.response.mimeType || ''
+    const isTripoApiHost = /api\.tripo3d\.ai/i.test(responseUrl)
+    const looksLikeJson = mimeType.includes('json') || mimeType.includes('text/plain') || isTripoApiHost
+    if (!looksLikeJson) return
+
+    const isStudioApiPath = /studio\.tripo3d\.ai.*\/api\//i.test(responseUrl)
+    const hasAssetKeyword =
+      /assets|projects|models|tasks|history|library|workspace|generation|studio|creation|collect|user|gallery|mine|owned/i.test(
+        responseUrl
+      )
+    if (!isTripoApiHost && !isStudioApiPath && !hasAssetKeyword) return
 
     try {
       const body = await wc.debugger.sendCommand('Network.getResponseBody', {
@@ -1047,13 +1397,13 @@ async function scrollTripoAssetsPage(win) {
   `)
 }
 
-async function waitForTripoHistoryItems(win, timeoutMs = 2500) {
+async function waitForTripoHistoryItems(win, timeoutMs = 8000) {
   const startedAt = Date.now()
 
   while (Date.now() - startedAt < timeoutMs) {
     const scraped = await scrapeTripoHistoryItems(win)
     if (scraped.items?.length) return scraped
-    await wait(250)
+    await wait(400)
   }
 
   return scrapeTripoHistoryItems(win)
@@ -1062,14 +1412,9 @@ async function waitForTripoHistoryItems(win, timeoutMs = 2500) {
 async function scrapeTripoHistoryItems(win) {
   return win.webContents.executeJavaScript(`
     (() => {
-      const visible = (el) => {
-        if (!el) return false
-        const style = window.getComputedStyle(el)
-        const rect = el.getBoundingClientRect()
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
-      }
+      ${tripoInpageHelpers()}
+      dismissTripoOverlays()
 
-      const textOf = (el) => (el?.innerText || el?.textContent || '').replace(/\\s+/g, ' ').trim()
       const absolute = (value) => {
         if (!value) return ''
         try {
@@ -1079,8 +1424,9 @@ async function scrapeTripoHistoryItems(win) {
         }
       }
 
-      const path = location.pathname.replace(/\\/$/, '')
-      if (!path.endsWith('/assets')) {
+      const assetPath = location.pathname.replace(/\\/$/, '').toLowerCase()
+      const onMyAssetsPage = assetPath === '/assets' || assetPath.endsWith('/assets')
+      if (!onMyAssetsPage) {
         return {
           url: location.href,
           title: document.title,
@@ -1146,9 +1492,21 @@ async function scrapeTripoHistoryItems(win) {
         if (el.matches?.('a[href]')) return absolute(el.href)
         const anchor = el.querySelector?.('a[href]')
         if (anchor?.href) return absolute(anchor.href)
-        for (const attr of ['data-href', 'data-url', 'data-link', 'href']) {
+        for (const attr of ['data-href', 'data-url', 'data-link', 'data-model-id', 'data-project-id', 'data-id', 'href']) {
           const value = el.getAttribute?.(attr)
-          if (value) return absolute(value)
+          if (!value) continue
+          if (/^[0-9a-f-]{36}$/i.test(value)) return absolute('/3d-model/' + value)
+          return absolute(value)
+        }
+        let node = el
+        while (node && node !== document.body) {
+          for (const attr of ['data-href', 'data-url', 'data-link', 'data-model-id', 'data-project-id', 'data-id']) {
+            const value = node.getAttribute?.(attr)
+            if (!value) continue
+            if (/^[0-9a-f-]{36}$/i.test(value)) return absolute('/3d-model/' + value)
+            return absolute(value)
+          }
+          node = node.parentElement
         }
         const onclick = el.getAttribute?.('onclick') || ''
         const onclickMatch = onclick.match(/https?:\\/\\/[^'\"\\s]+/i)
@@ -1189,7 +1547,7 @@ async function scrapeTripoHistoryItems(win) {
       }
 
       const getMyAssetsScope = () => {
-        const myAssetsTab = Array.from(document.querySelectorAll('button,[role="tab"]'))
+        const myAssetsTab = queryAllDeep('button,[role="tab"]')
           .filter(visible)
           .find((el) => /^My Assets$/i.test(textOf(el)))
         if (myAssetsTab) {
@@ -1199,7 +1557,7 @@ async function scrapeTripoHistoryItems(win) {
             if (panel) return panel
           }
         }
-        return document.querySelector('main') || document.body
+        return queryDeep('main') || document.body
       }
 
       const scopeRoot = getMyAssetsScope()
@@ -1252,7 +1610,7 @@ async function scrapeTripoHistoryItems(win) {
         }
       }
 
-      Array.from(scopeRoot.querySelectorAll('a[href]'))
+      queryAllDeep('a[href]', scopeRoot)
         .filter(visible)
         .filter((link) => !isInsideExcludedSection(link))
         .filter((link) => isLikelyAssetDetailUrl(absolute(link.href)))
@@ -1262,7 +1620,7 @@ async function scrapeTripoHistoryItems(win) {
           if (item) pushItem(item)
         })
 
-      Array.from(scopeRoot.querySelectorAll('img'))
+      queryAllDeep('img', scopeRoot)
         .filter(visible)
         .filter(isLikelyPreviewImage)
         .filter((img) => !isInsideExcludedSection(img))
@@ -1273,6 +1631,30 @@ async function scrapeTripoHistoryItems(win) {
           const item = buildFromCard(card)
           if (item) pushItem(item)
         })
+
+      queryAllDeep('[class*="card"],[data-testid*="asset"],article,li,[role="listitem"]', scopeRoot)
+        .filter(visible)
+        .filter((el) => !isInsideExcludedSection(el))
+        .forEach((card) => {
+          const item = buildFromCard(card)
+          if (item) pushItem(item)
+        })
+
+      const bodyTextForIds = (document.body?.innerHTML || '').slice(0, 500000)
+      const embeddedModelIds = Array.from(
+        bodyTextForIds.matchAll(/\\/3d-model\\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)
+      ).map((match) => match[1])
+      embeddedModelIds.forEach((modelId) => {
+        pushItem({
+          id: modelId,
+          name: 'Tripo Asset',
+          prompt: '',
+          previewUrl: '',
+          detailUrl: absolute('/3d-model/' + modelId),
+          downloadUrl: '',
+          actionTexts: []
+        })
+      })
 
       return {
         url: location.href,
@@ -1317,34 +1699,51 @@ async function clickTripoHistoryNavigation(win) {
 }
 
 async function listTripoHistoryItems(baseUrl, generateUrl) {
-  const status = await inspectTripoWebSession(baseUrl, generateUrl)
+  const status = await inspectTripoWebSessionForSync(baseUrl, generateUrl)
   if (!status.connected) {
     return {
       success: false,
-      error:
-        'No active Tripo website session was detected. Connect your account and make sure the session is ready first.'
+      error: status.loginDetected
+        ? 'Tripo login required. Open Connect Account in Settings or Modeling, sign in, then try Sync My Assets again.'
+        : 'No active Tripo website session was detected. Connect your account and make sure the session is ready first.'
     }
   }
 
   let win = null
   let networkCapture = null
   try {
-    const assetsUrl = getTripoHistoryUrlCandidates(baseUrl)[0]
+    const candidates = getTripoHistoryUrlCandidates(baseUrl)
     win = await createTripoWebWindow({
-      url: assetsUrl,
+      url: 'about:blank',
       show: false,
       title: 'Tripo My Assets Sync'
     })
     networkCapture = attachTripoAssetsNetworkCapture(win)
-    await win.webContents.reload()
-    await wait(2500)
-    const tabResult = await ensureTripoMyAssetsTab(win)
-    console.log('[tripo-sync] My Assets tab:', tabResult)
-    await wait(1000)
-    await scrollTripoAssetsPage(win)
-    await wait(750)
 
-    const scraped = await waitForTripoHistoryItems(win, 5000)
+    let scraped = { items: [], url: '', title: '', skipped: null }
+    for (const assetsUrl of candidates) {
+      await win.loadURL(assetsUrl)
+      await wait(3000)
+      const tabResult = await ensureTripoMyAssetsTab(win)
+      console.log('[tripo-sync] My Assets tab:', tabResult, 'url:', assetsUrl)
+      await wait(1200)
+      await scrollTripoAssetsPage(win)
+      await wait(1000)
+      await scrollTripoAssetsPage(win)
+      await wait(750)
+
+      scraped = await waitForTripoHistoryItems(win, 8000)
+      if (scraped.skipped === 'not-my-assets-page') continue
+      if (scraped.items?.length || scraped.empty) break
+
+      const nav = await clickTripoHistoryNavigation(win)
+      if (nav.clicked) {
+        await wait(1500)
+        scraped = await waitForTripoHistoryItems(win, 5000)
+        if (scraped.items?.length || scraped.empty) break
+      }
+    }
+
     const networkItems = parseTripoAssetsFromNetworkPayloads(networkCapture.payloads)
     const combinedByKey = new Map()
 
@@ -1362,12 +1761,13 @@ async function listTripoHistoryItems(baseUrl, generateUrl) {
       empty: scraped.empty,
       domItems: scraped.items?.length || 0,
       networkPayloads: networkCapture.payloads.length,
+      networkUrls: networkCapture.payloads.slice(0, 12).map((entry) => entry.url),
       networkItems: networkItems.length,
       validItems: filteredItems.length,
       debug: scraped.debug
     })
 
-    if (scraped.skipped === 'not-my-assets-page') {
+    if (scraped.skipped === 'not-my-assets-page' && !networkItems.length) {
       return {
         success: false,
         error:
@@ -1417,10 +1817,16 @@ async function importTripoHistoryItem({
   const outDir = getWorkspaceModelDir()
   ensureDir(outDir)
 
+  const resolved = resolveTripoImportUrls({ tripoAssetId, detailUrl, downloadUrl })
+  detailUrl = resolved.detailUrl
+  downloadUrl = resolved.downloadUrl
+  tripoAssetId = resolved.tripoAssetId
+
   let win = null
+  let networkCapture = null
+
   try {
-    const targetUrl = downloadUrl || detailUrl
-    if (!targetUrl) {
+    if (!detailUrl && !downloadUrl) {
       return { success: false, error: 'History item is missing a Tripo URL to import from.' }
     }
 
@@ -1434,40 +1840,55 @@ async function importTripoHistoryItem({
       }
     }
 
+    const directPath = await tryDirectTripoDownloads([downloadUrl], outDir)
+    if (directPath) {
+      const item = persistGeneratedModel({
+        sourcePath: directPath,
+        name,
+        prompt,
+        provider: 'tripo-history',
+        sourceTab,
+        tripoAssetId,
+        detailUrl: detailUrl || null,
+        previewUrl: previewUrl || null
+      })
+      return { success: true, item }
+    }
+
+    const targetUrl = downloadUrl || detailUrl
     win = await createTripoWebWindow({
-      url: targetUrl,
+      url: 'about:blank',
       show: false,
       title: 'Tripo History Import'
     })
-    await wait(2500)
+    networkCapture = attachTripoAssetsNetworkCapture(win)
+    await win.loadURL(targetUrl)
+    await wait(3500)
 
-    const downloadPromise = captureTripoWebDownload(win, outDir, 120000)
-
-    if (downloadUrl && /\.(glb|gltf)(\?|$)/i.test(downloadUrl)) {
-      win.webContents.downloadURL(downloadUrl)
-    } else {
-      for (let attempt = 0; attempt < 60; attempt++) {
-        const action = await triggerTripoWebDownload(win)
-        if (action.action === 'downloadURL' && action.url) {
-          win.webContents.downloadURL(action.url)
-          break
-        }
-        if (action.action === 'clicked') {
-          await wait(1500)
-        } else {
-          await wait(2000)
-        }
-      }
+    const networkUrls = parseTripoModelUrlsFromNetworkPayloads(networkCapture.payloads)
+    const networkDirectPath = await tryDirectTripoDownloads([downloadUrl, ...networkUrls], outDir)
+    if (networkDirectPath) {
+      const item = persistGeneratedModel({
+        sourcePath: networkDirectPath,
+        name,
+        prompt,
+        provider: 'tripo-history',
+        sourceTab,
+        tripoAssetId,
+        detailUrl: detailUrl || null,
+        previewUrl: previewUrl || null
+      })
+      return { success: true, item }
     }
 
-    const tempOutputPath = await downloadPromise
+    const tempOutputPath = await importTripoModelViaBrowser(win, outDir, { downloadUrl })
     const item = persistGeneratedModel({
       sourcePath: tempOutputPath,
       name,
       prompt,
       provider: 'tripo-history',
       sourceTab,
-      tripoAssetId: tripoAssetId || normalizeTripoAssetId(detailUrl || downloadUrl),
+      tripoAssetId,
       detailUrl: detailUrl || null,
       previewUrl: previewUrl || null
     })
@@ -1475,15 +1896,41 @@ async function importTripoHistoryItem({
   } catch (err) {
     return { success: false, error: err.message || 'Could not import the selected Tripo history asset.' }
   } finally {
+    networkCapture?.detach()
     if (win) win.destroy()
   }
 }
 
-async function importTripoSyncedAssetById(assetId, { name = '', prompt = '', sourceTab = null } = {}) {
+async function importTripoSyncedAssetById(
+  assetId,
+  { name = '', prompt = '', sourceTab = null, detailUrl = '', downloadUrl = '' } = {}
+) {
   const id = normalizeTripoAssetId(assetId)
-  const entry = getTripoSyncedAssets().find((item) => item.id === id)
+  let entry = getTripoSyncedAssets().find((item) => item.id === id)
+
+  if (!entry && id) {
+    const builtDetail = buildTripoDetailUrlFromId(id)
+    if (builtDetail || detailUrl || downloadUrl) {
+      entry = {
+        id,
+        name: name || 'Tripo Asset',
+        detailUrl: detailUrl || builtDetail || '',
+        downloadUrl: downloadUrl || '',
+        previewUrl: '',
+        localPath: null
+      }
+    }
+  }
+
   if (!entry) {
-    return { success: false, error: 'Synced Tripo asset was not found in the local cache.' }
+    return importTripoHistoryItem({
+      detailUrl: detailUrl || buildTripoDetailUrlFromId(assetId),
+      downloadUrl,
+      name,
+      prompt,
+      sourceTab,
+      tripoAssetId: id || normalizeTripoAssetId(detailUrl || downloadUrl)
+    })
   }
 
   if (!isValidTripoSyncedAssetEntry(entry)) {
@@ -1523,18 +1970,13 @@ async function configureTripoWebGenerationOptions(
 ) {
   return win.webContents.executeJavaScript(`
     ((opts) => {
-      const visible = (el) => {
-        if (!el) return false
-        const style = window.getComputedStyle(el)
-        const rect = el.getBoundingClientRect()
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
-      }
-      const textOf = (el) =>
-        (el?.innerText || el?.textContent || el?.getAttribute('aria-label') || el?.title || '').trim()
+      ${tripoInpageHelpers()}
+      dismissTripoOverlays()
       const results = { applied: [], skipped: [] }
 
       const versionPatterns = {
         'v3.1-20260211': /v?3\\.1|best quality|latest/i,
+        'v3.0-20250421': /v?3\\.0|quality/i,
         'v2.5-20250123': /v?2\\.5/i,
         'v2.0-20240919': /v?2\\.0|\\bfast\\b/i
       }
@@ -1549,7 +1991,12 @@ async function configureTripoWebGenerationOptions(
         return false
       }
 
-      const selects = Array.from(document.querySelectorAll('select')).filter(visible)
+      const meshMode = opts.smartLowPoly ? /^Smart Mesh$/i : /^HD Model$/i
+      const meshTargets = queryAllDeep('button,[role="button"],[role="tab"],label,span,div').filter(visible)
+      if (clickMatch(meshTargets, meshMode)) results.applied.push('smartLowPoly')
+      else results.skipped.push('smartLowPoly')
+
+      const selects = queryAllDeep('select').filter(visible)
       let versionSet = false
       for (const select of selects) {
         const options = Array.from(select.options || [])
@@ -1562,27 +2009,26 @@ async function configureTripoWebGenerationOptions(
         }
       }
       if (!versionSet) {
-        const versionTargets = Array.from(
-          document.querySelectorAll('button,[role="option"],[role="menuitem"],[role="tab"],label,span,div')
-        ).filter(visible)
-        versionSet = clickMatch(versionTargets, versionPattern)
+        const versionButton = queryAllDeep('button,[role="combobox"],[role="option"],[role="menuitem"],[role="tab"],label,span,div')
+          .filter(visible)
+          .find((el) => versionPattern.test(textOf(el)))
+        if (versionButton) {
+          versionButton.click()
+          versionSet = true
+        }
       }
       if (versionSet) results.applied.push('modelVersion')
       else results.skipped.push('modelVersion')
 
       if (opts.style) {
         const stylePattern = new RegExp(opts.style.replace(/-/g, '[\\\\s-]?'), 'i')
-        const styleTargets = Array.from(
-          document.querySelectorAll('button,[role="option"],[role="menuitem"],option,label,span,div')
-        ).filter(visible)
+        const styleTargets = queryAllDeep('button,[role="option"],[role="menuitem"],option,label,span,div').filter(visible)
         if (clickMatch(styleTargets, stylePattern)) results.applied.push('style')
         else results.skipped.push('style')
       }
 
       const setToggle = (labelPattern, desired) => {
-        const candidates = Array.from(
-          document.querySelectorAll('button,[role="switch"],input[type="checkbox"],label,span,div')
-        )
+        const candidates = queryAllDeep('button,[role="switch"],input[type="checkbox"],label,span,div')
           .filter(visible)
           .filter((el) => labelPattern.test(textOf(el) + ' ' + (el.getAttribute('aria-label') || '')))
 
@@ -1610,9 +2056,6 @@ async function configureTripoWebGenerationOptions(
 
       if (setToggle(/\\bpbr\\b|physically[- ]based/i, !!opts.pbr)) results.applied.push('pbr')
       else results.skipped.push('pbr')
-
-      if (setToggle(/low[\\s-]?poly|smart low/i, !!opts.smartLowPoly)) results.applied.push('smartLowPoly')
-      else results.skipped.push('smartLowPoly')
 
       return { success: true, results }
     })(${JSON.stringify({ modelVersion, style, texture, pbr, smartLowPoly })})
@@ -1776,20 +2219,12 @@ async function uploadTripoMultiviewReferenceImages(win, imagePaths = {}) {
 async function submitTripoWebPrompt(win, prompt) {
   return win.webContents.executeJavaScript(`
     ((promptText) => {
-      const visible = (el) => {
-        if (!el) return false
-        const style = window.getComputedStyle(el)
-        const rect = el.getBoundingClientRect()
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
-      }
+      ${tripoInpageHelpers()}
+      dismissTripoOverlays()
 
-      const textOf = (el) => (el?.innerText || el?.textContent || el?.getAttribute('aria-label') || '').trim()
-      const promptTargets = Array.from(
-        document.querySelectorAll('textarea,input[type="text"],[contenteditable="true"],input:not([type])')
-      )
+      const promptTargets = queryAllDeep('textarea,input[type="text"],[contenteditable="true"],input:not([type])')
         .filter(visible)
         .filter((el) => {
-          if (el.readOnly) return false
           const hint = [el.placeholder, el.getAttribute('aria-label'), el.name, textOf(el.parentElement)]
             .filter(Boolean)
             .join(' ')
@@ -1820,14 +2255,14 @@ async function submitTripoWebPrompt(win, prompt) {
         return { success: false, error: 'No visible prompt input was found on the Tripo Studio generate page.' }
       }
 
-      const buttons = Array.from(document.querySelectorAll('button,a,[role="button"]')).filter(visible)
+      const buttons = queryAllDeep('button,a,[role="button"]').filter(visible)
       const action = buttons.find((el) => {
         const text = textOf(el)
         return /^Generate Model(\\b|\\s|$|\\d)/i.test(text)
       }) || buttons.find((el) => {
         const text = textOf(el)
         return /generate|create|start|run/i.test(text) &&
-          !/generate hd model|generate smart mesh|log in|sign in|download|export|gallery|feature my model/i.test(text)
+          !/generate hd model|generate smart mesh|log in|sign in|download|export|gallery|feature my model|start free/i.test(text)
       })
 
       if (!action) {
@@ -2026,33 +2461,39 @@ async function scrapeElevenLabsGeneratedImage(win, outDir) {
 async function triggerTripoWebDownload(win, preferredFormat = 'glb') {
   return win.webContents.executeJavaScript(`
     ((fmt) => {
-      const visible = (el) => {
-        if (!el) return false
-        const style = window.getComputedStyle(el)
-        const rect = el.getBoundingClientRect()
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 4 && rect.height > 4
-      }
-      const textOf = (el) => (el?.innerText || el?.textContent || '').trim()
+      ${tripoInpageHelpers()}
+      dismissTripoOverlays()
 
-      // If a non-GLB format is requested, try to find and click a format selector first
-      if (fmt !== 'glb') {
-        const fmtRe = new RegExp('^' + fmt + '$', 'i')
-        const fmtBtn = Array.from(document.querySelectorAll('button,a,[role="button"],li,[role="option"]'))
-          .filter(visible)
-          .find(el => fmtRe.test(textOf(el).split(/[\\s/|,]/)[0]))
-        if (fmtBtn) { fmtBtn.click(); return { action: 'format', format: textOf(fmtBtn) } }
-      }
-
-      const directLink = Array.from(document.querySelectorAll('a[href]'))
+      const directLink = queryAllDeep('a[href]')
         .filter(visible)
-        .find((el) => /\\.glb(\\?|$)/i.test(el.href) || /download|export|glb/i.test(textOf(el)))
+        .find((el) => new RegExp('\\\\.' + fmt + '(\\\\?|$)', 'i').test(el.href) || /\\.(glb|gltf)(\\?|$)/i.test(el.href))
 
       if (directLink?.href) {
         return { action: 'downloadURL', url: directLink.href, label: textOf(directLink) }
       }
 
-      const buttons = Array.from(document.querySelectorAll('button,a,[role="button"]')).filter(visible)
-      const clickTarget = buttons.find((el) => /download|export|glb/i.test(textOf(el)))
+      if (fmt !== 'glb') {
+        const fmtRe = new RegExp('^' + fmt + '$', 'i')
+        const fmtBtn = queryAllDeep('button,a,[role="button"],li,[role="option"],[role="menuitem"]')
+          .filter(visible)
+          .find((el) => fmtRe.test(textOf(el).split(/[\\s/|,]/)[0]))
+        if (fmtBtn) {
+          fmtBtn.click()
+          return { action: 'format', format: textOf(fmtBtn) }
+        }
+      }
+
+      const exportButton = queryAllDeep('button,a,[role="button"],[role="menuitem"]')
+        .filter(visible)
+        .find((el) => /^(export|download|save)(\\b|\\s|$)/i.test(textOf(el)) || /download model|export model|save model/i.test(textOf(el)))
+
+      if (exportButton) {
+        exportButton.click()
+        return { action: 'clicked', label: textOf(exportButton) }
+      }
+
+      const buttons = queryAllDeep('button,a,[role="button"]').filter(visible)
+      const clickTarget = buttons.find((el) => /download|export|\\bglb\\b/i.test(textOf(el)))
       if (clickTarget) {
         clickTarget.click()
         return { action: 'clicked', label: textOf(clickTarget) }
@@ -2679,18 +3120,47 @@ ipcMain.handle('vfx:exportPackage', async (_, payload) => {
 
     ensureDir(folderPath)
 
-    const stem = sanitizeFileStem(payload?.effectName || 'particle-vfx')
-    const presetPath = join(folderPath, `${stem}.preset.json`)
-    const workflowPath = join(folderPath, `${stem}.workflow.txt`)
+    const effectName = payload?.effectName || payload?.preset?.meta?.effectName || 'particle-vfx'
+    const stem = sanitizeFileStem(effectName)
+    const bundle = writeStudioBundle({
+      folderPath,
+      effectName,
+      preset: payload?.preset ?? {},
+      workflowText: payload?.workflowText ?? '',
+      stem
+    })
 
-    writeFileSync(presetPath, JSON.stringify(payload?.preset ?? {}, null, 2), 'utf8')
-    writeFileSync(workflowPath, String(payload?.workflowText ?? ''), 'utf8')
+    writeFileSync(bundle.presetPath, JSON.stringify(payload?.preset ?? {}, null, 2), 'utf8')
+    writeFileSync(bundle.workflowPath, String(payload?.workflowText ?? ''), 'utf8')
+    writeFileSync(bundle.manifestPath, JSON.stringify(bundle.manifest, null, 2), 'utf8')
+    writeFileSync(bundle.readmePath, buildBundleReadme({ effectName, manifest: bundle.manifest }), 'utf8')
+
+    let pluginInstall = null
+    if (payload?.installPlugin) {
+      pluginInstall = installRoflowVfxPlugin()
+    }
 
     return {
       success: true,
       folderPath,
-      files: { presetPath, workflowPath }
+      files: {
+        presetPath: bundle.presetPath,
+        workflowPath: bundle.workflowPath,
+        manifestPath: bundle.manifestPath,
+        readmePath: bundle.readmePath,
+        textures: bundle.copiedTextures.map((entry) => entry.destPath)
+      },
+      pluginInstall
     }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('vfx:installStudioPlugin', async () => {
+  try {
+    const pluginInstall = installRoflowVfxPlugin()
+    return { success: true, ...pluginInstall }
   } catch (err) {
     return { success: false, error: err.message }
   }
@@ -3655,8 +4125,7 @@ ipcMain.handle(
 
 ipcMain.handle('tripo:webOpenLogin', async (_, { baseUrl } = {}) => {
   try {
-    const url = normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL)
-    await createTripoWebWindow({ url, show: true, title: 'Connect Tripo Account' })
+    await openTripoLoginWindow(baseUrl)
     return { success: true }
   } catch (err) {
     return { success: false, error: err.message }
@@ -3675,7 +4144,7 @@ ipcMain.handle('tripo:webOpenGenerate', async (_, { generateUrl, baseUrl } = {})
 
 ipcMain.handle('tripo:webSessionStatus', async (_, { baseUrl, generateUrl } = {}) => {
   try {
-    return await inspectTripoWebSession(
+    return await inspectTripoWebSessionForSync(
       normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL),
       normalizeExternalUrl(generateUrl, DEFAULT_TRIPO_WEB_GENERATE_URL)
     )
@@ -3993,6 +4462,7 @@ ipcMain.handle(
     } = {}
   ) => {
     let win = null
+    let networkCapture = null
 
     try {
       const trimmedPrompt = prompt.trim()
@@ -4021,7 +4491,7 @@ ipcMain.handle(
         }
       }
 
-      const status = await inspectTripoWebSession(
+      const status = await inspectTripoWebSessionForSync(
         normalizeExternalUrl(baseUrl, DEFAULT_TRIPO_WEB_BASE_URL),
         normalizeExternalUrl(generateUrl, DEFAULT_TRIPO_WEB_GENERATE_URL)
       )
@@ -4042,6 +4512,7 @@ ipcMain.handle(
         show: showBrowser,
         title: 'Tripo Automation'
       })
+      networkCapture = attachTripoAssetsNetworkCapture(win)
 
       event.sender.send('modeling:progress', { step: 'Finding Tripo generation page…', pct: 16 })
       const targetSurface = await navigateToTripoGenerateSurface(
@@ -4121,27 +4592,31 @@ ipcMain.handle(
         }
       }
 
-      const downloadPromise = captureTripoWebDownload(win, outDir)
-
-      for (let attempt = 0; attempt < 80; attempt++) {
-        await wait(4000)
-        const pct = Math.min(92, 30 + attempt)
-        event.sender.send('modeling:progress', { step: 'Waiting for Tripo result…', pct })
-        const action = await triggerTripoWebDownload(win, downloadFormat)
-        if (action.action === 'downloadURL' && action.url) {
-          win.webContents.downloadURL(action.url)
-          break
-        }
-        if (action.action === 'clicked' || action.action === 'format') {
-          // Allow the page to open export menus or trigger a native download event.
-          await wait(1500)
+      event.sender.send('modeling:progress', { step: 'Waiting for Tripo to finish generating…', pct: 35 })
+      const generationState = await waitForTripoGenerationComplete(win, 300000)
+      if (generationState.failed) {
+        return {
+          success: false,
+          error: 'Tripo reported that generation failed. Check the browser session and try again.'
         }
       }
 
-      const outputPath = await downloadPromise
+      const networkUrls = parseTripoModelUrlsFromNetworkPayloads(networkCapture?.payloads || [])
+      const directOutputPath = await tryDirectTripoDownloads(networkUrls, outDir, downloadFormat)
+      if (directOutputPath) {
+        event.sender.send('modeling:progress', { step: 'Model ready!', pct: 100 })
+        const provider = isMultiview ? 'tripo-web-multiview' : isImageMode ? 'tripo-web-image' : 'tripo-web'
+        return { success: true, outputPath: directOutputPath, provider }
+      }
+
+      event.sender.send('modeling:progress', { step: 'Downloading model from Tripo…', pct: 82 })
+      const tempOutputPath = await importTripoModelViaBrowser(win, outDir, {
+        preferredFormat: downloadFormat,
+        timeoutMs: 180000
+      })
       event.sender.send('modeling:progress', { step: 'Model ready!', pct: 100 })
       const provider = isMultiview ? 'tripo-web-multiview' : isImageMode ? 'tripo-web-image' : 'tripo-web'
-      return { success: true, outputPath, provider }
+      return { success: true, outputPath: tempOutputPath, provider }
     } catch (err) {
       return {
         success: false,
@@ -4150,6 +4625,7 @@ ipcMain.handle(
           'Tripo website automation failed. Keep the browser session connected and update the generation URL if the site layout changed.'
       }
     } finally {
+      networkCapture?.detach()
       if (win && !keepWindowOpen) win.destroy()
     }
   }

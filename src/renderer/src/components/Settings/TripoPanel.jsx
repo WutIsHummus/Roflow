@@ -17,6 +17,13 @@ const VERSIONS = [
   { id: 'v2.0-20240919', label: 'v2.0 (Fast)' }
 ]
 
+const DOWNLOAD_FORMATS = [
+  { id: 'glb', label: 'GLB' },
+  { id: 'fbx', label: 'FBX' },
+  { id: 'obj', label: 'OBJ' },
+  { id: 'stl', label: 'STL' }
+]
+
 const DEFAULT_TRIPO_WEB_BASE_URL = 'https://studio.tripo3d.ai/'
 const DEFAULT_TRIPO_WEB_GENERATE_URL = 'https://studio.tripo3d.ai/workspace/generate'
 
@@ -29,6 +36,7 @@ export default function TripoPanel() {
   const [texture, setTexture] = useState(true)
   const [pbr, setPbr] = useState(true)
   const [smartLowPoly, setSmartLowPoly] = useState(false)
+  const [downloadFormat, setDownloadFormat] = useState('glb')
   const [webStatus, setWebStatus] = useState('idle')
   const [webMsg, setWebMsg] = useState('')
   const [webMeta, setWebMeta] = useState(null)
@@ -46,8 +54,9 @@ export default function TripoPanel() {
       window.api.configGet('tripoStyle'),
       window.api.configGet('tripoTexture'),
       window.api.configGet('tripoPbr'),
-      window.api.configGet('tripoSmartLowPoly')
-    ]).then(([baseUrl, generateUrl, showBrowser, version, styleVal, textureVal, pbrVal, lowPoly]) => {
+      window.api.configGet('tripoSmartLowPoly'),
+      window.api.configGet('tripoDownloadFormat')
+    ]).then(([baseUrl, generateUrl, showBrowser, version, styleVal, textureVal, pbrVal, lowPoly, format]) => {
       if (!active) return
       if (baseUrl) setWebBaseUrl(baseUrl)
       if (generateUrl) setWebGenerateUrl(generateUrl)
@@ -57,6 +66,7 @@ export default function TripoPanel() {
       if (typeof textureVal === 'boolean') setTexture(textureVal)
       if (typeof pbrVal === 'boolean') setPbr(pbrVal)
       if (typeof lowPoly === 'boolean') setSmartLowPoly(lowPoly)
+      if (format && DOWNLOAD_FORMATS.some((item) => item.id === format)) setDownloadFormat(format)
       setLoaded(true)
     })
 
@@ -78,6 +88,7 @@ export default function TripoPanel() {
     await window.api.configSet('tripoTexture', texture !== false)
     await window.api.configSet('tripoPbr', pbr !== false)
     await window.api.configSet('tripoSmartLowPoly', !!smartLowPoly)
+    await window.api.configSet('tripoDownloadFormat', downloadFormat || 'glb')
     setSavedMsg('Saved')
     setTimeout(() => setSavedMsg(''), 2000)
   }
@@ -120,7 +131,7 @@ export default function TripoPanel() {
       return
     }
     setWebStatus('idle')
-    setWebMsg('Browser session opened. Log in there, then run Check Session here.')
+    setWebMsg('Browser session opened. Sign in through the Tripo popup, then run Check Session here.')
   }
 
   async function openGeneratePage() {
@@ -183,8 +194,9 @@ export default function TripoPanel() {
           🌐 Browser Session Only
         </div>
         <div style={{ fontSize: 11, color: '#7c8396', lineHeight: 1.7 }}>
-          Modeling runs through your normal Tripo website account in a persistent Electron browser
-          window.
+          RoFlow drives Tripo Studio through a persistent browser session at studio.tripo3d.ai.
+          Use Connect Account, sign in through the Tripo popup, then Check Session before generating
+          or syncing My Assets.
         </div>
       </div>
 
@@ -401,6 +413,32 @@ export default function TripoPanel() {
             </option>
           ))}
         </select>
+      </div>
+
+      <div>
+        <label
+          style={{
+            display: 'block',
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#555b6e',
+            marginBottom: 6,
+            textTransform: 'uppercase',
+            letterSpacing: '0.07em'
+          }}
+        >
+          Download Format
+        </label>
+        <select value={downloadFormat} onChange={(e) => setDownloadFormat(e.target.value)} style={sel}>
+          {DOWNLOAD_FORMATS.map((fmt) => (
+            <option key={fmt.id} value={fmt.id}>
+              {fmt.label}
+            </option>
+          ))}
+        </select>
+        <p style={{ fontSize: 10, color: '#3e4455', marginTop: 5 }}>
+          GLB recommended for Roblox and Playground preview
+        </p>
       </div>
 
       <div>

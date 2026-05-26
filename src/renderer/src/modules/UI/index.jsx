@@ -46,12 +46,37 @@ const RBX_CLASSES = {
   UIFlexItem:      { label: 'UIFlexItem',      group: 'Modifier',  color: '#134e4a', icon: '⇔',   canHaveChildren: false },
   UIAspectRatioConstraint: { label: 'UIAspectRatio', group: 'Modifier', color: '#134e4a', icon: '⊟', canHaveChildren: false },
   UISizeConstraint:{ label: 'UISizeConstraint',group: 'Modifier',  color: '#134e4a', icon: '⟺',   canHaveChildren: false },
+  UIShadow:        { label: 'UIShadow',        group: 'Modifier',  color: '#312e81', icon: '🌑',  canHaveChildren: false, beta: true },
+  Path2D:          { label: 'Path2D',          group: 'Label',     color: '#581c87', icon: '⌇',   canHaveChildren: false, beta: true },
 }
 
 const CLASS_GROUPS = ['Container', 'Label', 'Button', 'Input', 'Layout', 'Modifier']
 
+const IMPLICIT_ROOT_LABEL = 'ScreenGui'
+const PALETTE_HIDDEN = new Set(['ScreenGui'])
+
 const VISUAL_CLASSES = new Set(['ScreenGui','Frame','ScrollingFrame','ViewportFrame','BillboardGui',
-  'SurfaceGui','TextLabel','ImageLabel','VideoFrame','TextButton','ImageButton','TextBox'])
+  'SurfaceGui','TextLabel','ImageLabel','VideoFrame','TextButton','ImageButton','TextBox','Path2D'])
+
+const CANVAS_VISUAL_CLASSES = new Set([...VISUAL_CLASSES].filter((c) => c !== 'ScreenGui'))
+const GUI_OBJECT_CLASSES = CANVAS_VISUAL_CLASSES
+const ZINDEX_MODIFIER_CLASSES = new Set(['UIShadow'])
+
+function migrateUiInstances(instances = []) {
+  const screenGuiIds = new Set(instances.filter((i) => i.rbxClass === 'ScreenGui').map((i) => i.id))
+  return instances
+    .filter((i) => i.rbxClass !== 'ScreenGui')
+    .map((i) => ({
+      ...i,
+      parentId: i.parentId && screenGuiIds.has(i.parentId) ? null : i.parentId
+    }))
+}
+
+function getParentOptions(allInstances, instanceId) {
+  return allInstances.filter(
+    (i) => i.id !== instanceId && RBX_CLASSES[i.rbxClass]?.canHaveChildren && i.rbxClass !== 'ScreenGui'
+  )
+}
 
 // Default props per class
 function defaultProps(rbxClass) {
@@ -60,7 +85,8 @@ function defaultProps(rbxClass) {
     BackgroundTransparency: 0,
     BorderSizePixel: 0,
     Visible: true,
-    ZIndex: 1
+    ZIndex: 1,
+    LayoutOrder: 0
   }
   switch (rbxClass) {
     case 'TextLabel':
@@ -74,11 +100,27 @@ function defaultProps(rbxClass) {
     case 'ScrollingFrame':
       return { ...base, ScrollingDirection: 'Y', CanvasSize: 'UDim2.new(0,0,2,0)', ScrollBarThickness: 6 }
     case 'UIListLayout':
-      return { FillDirection: 'Vertical', HorizontalAlignment: 'Left', VerticalAlignment: 'Top', Padding: 'UDim.new(0,4)', SortOrder: 'LayoutOrder' }
+      return {
+        FillDirection: 'Vertical',
+        HorizontalAlignment: 'Left',
+        VerticalAlignment: 'Top',
+        Padding: 'UDim.new(0,4)',
+        SortOrder: 'LayoutOrder',
+        HorizontalFlex: 'None',
+        VerticalFlex: 'None',
+        Wraps: false,
+        ItemLineAlignment: 'Automatic'
+      }
     case 'UIGridLayout':
       return { CellSize: 'UDim2.new(0,100,0,100)', CellPadding: 'UDim2.new(0,4,0,4)', FillDirection: 'Horizontal', SortOrder: 'LayoutOrder' }
     case 'UICorner':
-      return { CornerRadius: 'UDim.new(0,8)' }
+      return {
+        CornerRadius: 'UDim.new(0,8)',
+        TopLeftRadius: '',
+        TopRightRadius: '',
+        BottomLeftRadius: '',
+        BottomRightRadius: ''
+      }
     case 'UIStroke':
       return { Color: '{ R:255, G:255, B:255 }', Thickness: 1, Transparency: 0, ApplyStrokeMode: 'Border' }
     case 'UIPadding':
@@ -86,11 +128,27 @@ function defaultProps(rbxClass) {
     case 'UIScale':
       return { Scale: 1 }
     case 'UIFlexItem':
-      return { FlexMode: 'Fill', GrowRatio: 1, ShrinkRatio: 1 }
+      return { FlexMode: 'Fill', GrowRatio: 1, ShrinkRatio: 1, ItemLineAlignment: 'Automatic' }
     case 'UIAspectRatioConstraint':
       return { AspectRatio: 1, AspectType: 'FitWithinMaxSize', DominantAxis: 'Width' }
     case 'UISizeConstraint':
       return { MinSize: 'Vector2.new(0,0)', MaxSize: 'Vector2.new(math.huge,math.huge)' }
+    case 'UIShadow':
+      return {
+        Color: '{ R:0, G:0, B:0 }',
+        Transparency: 0.5,
+        BlurRadius: 'UDim.new(0,12)',
+        Offset: 'UDim2.new(0,4,0,4)',
+        Spread: 0,
+        ZIndex: -1
+      }
+    case 'Path2D':
+      return {
+        ...base,
+        BackgroundTransparency: 1,
+        Color3: '{ R:255, G:255, B:255 }',
+        Thickness: 2
+      }
     default:
       return base
   }
@@ -98,7 +156,7 @@ function defaultProps(rbxClass) {
 
 function createInstance(rbxClass, overrides = {}) {
   const meta = RBX_CLASSES[rbxClass] || RBX_CLASSES.Frame
-  const isVisual = VISUAL_CLASSES.has(rbxClass)
+  const isVisual = CANVAS_VISUAL_CLASSES.has(rbxClass)
   return {
     id: `inst-${nextInstanceId++}`,
     rbxClass,
@@ -126,7 +184,11 @@ const DEFAULT_WORKFLOW = {
   visualDirection: '',
   implementationNotes: '',
   activeInstanceId: null,
-  instances: []
+  instances: [],
+  screenGuiDefaults: {
+    ZIndexBehavior: 'Sibling',
+    DisplayOrder: 0
+  }
 }
 
 const PROVIDERS = {
@@ -180,8 +242,8 @@ const DEFAULT_PROVIDER_SESSION_STATE = {
 
 function buildUIPrompt(workflow) {
   const instances = workflow.instances || []
-  const visualInsts = instances.filter((i) => VISUAL_CLASSES.has(i.rbxClass))
-  const modifierInsts = instances.filter((i) => !VISUAL_CLASSES.has(i.rbxClass))
+  const visualInsts = instances.filter((i) => CANVAS_VISUAL_CLASSES.has(i.rbxClass))
+  const modifierInsts = instances.filter((i) => !CANVAS_VISUAL_CLASSES.has(i.rbxClass))
 
   const header = [
     'Design a Roblox UI layout. Use only the information provided. Do not invent missing details.',
@@ -189,7 +251,8 @@ function buildUIPrompt(workflow) {
     workflow.projectName ? `Project: ${workflow.projectName}` : '',
     workflow.targetPlatform ? `Platform: ${workflow.targetPlatform}` : '',
     workflow.visualDirection ? `Visual direction: ${workflow.visualDirection}` : '',
-    workflow.implementationNotes ? `Implementation notes: ${workflow.implementationNotes}` : ''
+    workflow.implementationNotes ? `Implementation notes: ${workflow.implementationNotes}` : '',
+    `ScreenGui defaults: ZIndexBehavior=${workflow.screenGuiDefaults?.ZIndexBehavior || 'Sibling'}, DisplayOrder=${workflow.screenGuiDefaults?.DisplayOrder ?? 0}`
   ].filter(Boolean).join('\n')
 
   const instLines = visualInsts.map((inst, idx) => {
@@ -217,7 +280,7 @@ function buildUIPrompt(workflow) {
       .join(', ')
     const parent = inst.parentId
       ? instances.find((i) => i.id === inst.parentId)?.name || inst.parentId
-      : '(none)'
+      : IMPLICIT_ROOT_LABEL
     return `[${inst.rbxClass}] on ${parent}${props ? ' — ' + props : ''}`
   })
 
@@ -403,7 +466,11 @@ export default function UIModule({ workflowState, setWorkflowState, onChangeModu
     return {
       ...DEFAULT_WORKFLOW,
       ...saved,
-      instances: (saved.instances || []).map(normalizeInstance)
+      instances: migrateUiInstances((saved.instances || []).map(normalizeInstance)),
+      screenGuiDefaults: {
+        ...DEFAULT_WORKFLOW.screenGuiDefaults,
+        ...(saved.screenGuiDefaults || {})
+      }
     }
   })
   const [notice, setNotice] = useState('')
@@ -699,14 +766,14 @@ function InstancePalette({ onAdd }) {
           </button>
           {openGroup === group && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-              {Object.entries(RBX_CLASSES).filter(([, m]) => m.group === group).map(([cls, meta]) => (
+              {Object.entries(RBX_CLASSES).filter(([cls, m]) => m.group === group && !PALETTE_HIDDEN.has(cls) && !m.hidden).map(([cls, meta]) => (
                 <button
                   key={cls}
-                  title={cls}
+                  title={cls + (meta.beta ? ' (beta)' : '')}
                   onClick={() => onAdd(cls)}
                   style={{ fontSize: 10, padding: '3px 7px', borderRadius: 6, background: meta.color + '33', border: `1px solid ${meta.color}55`, color: '#c4cad8', cursor: 'pointer', whiteSpace: 'nowrap' }}
                 >
-                  {meta.icon} {meta.label}
+                  {meta.icon} {meta.label}{meta.beta ? ' β' : ''}
                 </button>
               ))}
             </div>
@@ -733,7 +800,7 @@ function InstanceTree({ instances, activeId, onSelect, onRemove }) {
         >
           <span style={{ fontSize: 11 }}>{meta.icon}</span>
           <span style={{ flex: 1, fontSize: 11, color: active ? '#c4b5fd' : '#c4cad8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inst.name}</span>
-          <span style={{ fontSize: 9, color: '#555b6e' }}>{inst.rbxClass}</span>
+          <span style={{ fontSize: 9, color: '#555b6e' }}>{inst.rbxClass}{meta.beta ? ' β' : ''}</span>
           <button onClick={(e) => { e.stopPropagation(); onRemove(inst.id) }} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 10, padding: 0 }}>✕</button>
         </div>
         {children.map((c) => renderNode(c, depth + 1))}
@@ -742,8 +809,13 @@ function InstanceTree({ instances, activeId, onSelect, onRemove }) {
   }
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', color: '#7c8499', fontSize: 11, borderBottom: '1px solid #1e2330', marginBottom: 4 }}>
+        <span>🖥️</span>
+        <span style={{ flex: 1, fontWeight: 700 }}>{IMPLICIT_ROOT_LABEL}</span>
+        <span style={{ fontSize: 9 }}>root</span>
+      </div>
       {roots.length === 0
-        ? <div style={{ fontSize: 11, color: '#555b6e', padding: '8px 10px' }}>No instances yet</div>
+        ? <div style={{ fontSize: 11, color: '#555b6e', padding: '8px 10px' }}>No instances yet — insert from palette</div>
         : roots.map((i) => renderNode(i))}
     </div>
   )
@@ -898,7 +970,7 @@ function UICanvas({ instances, activeId, onSelect, onUpdate, onCreate, onDeselec
     }
   }, []) // stable — reads everything via refs
 
-  const visualInstances = instances.filter((i) => VISUAL_CLASSES.has(i.rbxClass))
+  const visualInstances = instances.filter((i) => CANVAS_VISUAL_CLASSES.has(i.rbxClass))
 
   return (
     <div ref={containerRef} style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
@@ -983,6 +1055,8 @@ const IMAGE_CLASSES = new Set(['ImageLabel', 'ImageButton'])
 const TEXT_CLASSES = new Set(['TextLabel', 'TextButton', 'TextBox'])
 
 function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGenerateImage, busy, styles: S, workflow, onUpdateWorkflow }) {
+  const screenGuiDefaults = workflow.screenGuiDefaults || DEFAULT_WORKFLOW.screenGuiDefaults
+
   if (!instance) {
     return (
       <div style={{ fontSize: 12, color: '#555b6e', lineHeight: 1.8 }}>
@@ -997,6 +1071,30 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
             {PLATFORM_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
         </div>
+        <div style={S.card}>
+          <label style={S.label}>{IMPLICIT_ROOT_LABEL} (implicit root)</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>ZIndexBehavior</div>
+              <select
+                style={S.select}
+                value={screenGuiDefaults.ZIndexBehavior || 'Sibling'}
+                onChange={(e) => onUpdateWorkflow({ screenGuiDefaults: { ...screenGuiDefaults, ZIndexBehavior: e.target.value } })}
+              >
+                {['Sibling', 'Global'].map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>DisplayOrder</div>
+              <input
+                type="number"
+                style={S.input}
+                value={screenGuiDefaults.DisplayOrder ?? 0}
+                onChange={(e) => onUpdateWorkflow({ screenGuiDefaults: { ...screenGuiDefaults, DisplayOrder: Number(e.target.value) } })}
+              />
+            </div>
+          </div>
+        </div>
         <div style={{ padding: '12px 4px', color: '#555b6e', fontSize: 11 }}>
           Select an instance or click the canvas to add one.
         </div>
@@ -1005,10 +1103,12 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
   }
 
   const meta = RBX_CLASSES[instance.rbxClass] || RBX_CLASSES.Frame
-  const isVisual = VISUAL_CLASSES.has(instance.rbxClass)
+  const isVisual = CANVAS_VISUAL_CLASSES.has(instance.rbxClass)
   const isImage = IMAGE_CLASSES.has(instance.rbxClass)
   const isText = TEXT_CLASSES.has(instance.rbxClass)
-  const parents = allInstances.filter((i) => i.id !== instance.id && RBX_CLASSES[i.rbxClass]?.canHaveChildren)
+  const isGuiObject = GUI_OBJECT_CLASSES.has(instance.rbxClass)
+  const isZIndexModifier = ZINDEX_MODIFIER_CLASSES.has(instance.rbxClass)
+  const parents = getParentOptions(allInstances, instance.id)
 
   return (
     <div>
@@ -1022,15 +1122,40 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
         </div>
         <label style={S.label}>Name</label>
         <input style={S.input} value={instance.name} onChange={(e) => onUpdate(instance.id, { name: e.target.value })} />
+        {meta.beta && <div style={{ fontSize: 10, color: '#a78bfa', marginTop: 6 }}>Beta instance — requires recent Roblox Studio.</div>}
       </div>
 
-      {isVisual && (
+      <div style={S.card}>
+        <label style={S.label}>Parent</label>
+        <select style={S.select} value={instance.parentId || ''} onChange={(e) => onUpdate(instance.id, { parentId: e.target.value || null })}>
+          <option value="">{IMPLICIT_ROOT_LABEL} (root)</option>
+          {parents.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.rbxClass})</option>)}
+        </select>
+      </div>
+
+      {(isGuiObject || isZIndexModifier) && (
         <div style={S.card}>
-          <label style={S.label}>Parent</label>
-          <select style={S.select} value={instance.parentId || ''} onChange={(e) => onUpdate(instance.id, { parentId: e.target.value || null })}>
-            <option value="">ScreenGui (root)</option>
-            {parents.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.rbxClass})</option>)}
-          </select>
+          <label style={S.label}>Render &amp; Layering</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>ZIndex{isZIndexModifier ? ' (≤0 for shadow)' : ''}</div>
+              <input type="number" style={S.input} value={instance.properties.ZIndex ?? (isZIndexModifier ? -1 : 1)} onChange={(e) => onUpdateProp(instance.id, 'ZIndex', Number(e.target.value))} />
+            </div>
+            {isGuiObject && (
+              <div>
+                <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>LayoutOrder</div>
+                <input type="number" style={S.input} value={instance.properties.LayoutOrder ?? 0} onChange={(e) => onUpdateProp(instance.id, 'LayoutOrder', Number(e.target.value))} />
+              </div>
+            )}
+            {isGuiObject && (
+              <div>
+                <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>Visible</div>
+                <select style={S.select} value={String(instance.properties.Visible ?? true)} onChange={(e) => onUpdateProp(instance.id, 'Visible', e.target.value === 'true')}>
+                  <option value="true">true</option><option value="false">false</option>
+                </select>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1127,18 +1252,6 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
               <input type="number" min={0} max={1} step={0.05} style={S.input} value={instance.properties.BackgroundTransparency ?? 0} onChange={(e) => onUpdateProp(instance.id, 'BackgroundTransparency', Number(e.target.value))} />
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
-            <div>
-              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>ZIndex</div>
-              <input type="number" style={S.input} value={instance.properties.ZIndex ?? 1} onChange={(e) => onUpdateProp(instance.id, 'ZIndex', Number(e.target.value))} />
-            </div>
-            <div>
-              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>Visible</div>
-              <select style={S.select} value={String(instance.properties.Visible ?? true)} onChange={(e) => onUpdateProp(instance.id, 'Visible', e.target.value === 'true')}>
-                <option value="true">true</option><option value="false">false</option>
-              </select>
-            </div>
-          </div>
         </div>
       )}
 
@@ -1188,14 +1301,77 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
                 {['Top','Center','Bottom'].map((v) => <option key={v}>{v}</option>)}
               </select>
             </div>
+            <div>
+              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>SortOrder</div>
+              <select style={S.select} value={instance.properties.SortOrder || 'LayoutOrder'} onChange={(e) => onUpdateProp(instance.id, 'SortOrder', e.target.value)}>
+                {['LayoutOrder', 'Name', 'Custom'].map((v) => <option key={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>ItemLineAlignment</div>
+              <select style={S.select} value={instance.properties.ItemLineAlignment || 'Automatic'} onChange={(e) => onUpdateProp(instance.id, 'ItemLineAlignment', e.target.value)}>
+                {['Automatic', 'Start', 'Center', 'End', 'Stretch'].map((v) => <option key={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>HorizontalFlex</div>
+              <select style={S.select} value={instance.properties.HorizontalFlex || 'None'} onChange={(e) => onUpdateProp(instance.id, 'HorizontalFlex', e.target.value)}>
+                {['None', 'Fill', 'SpaceAround', 'SpaceBetween', 'SpaceEvenly'].map((v) => <option key={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>VerticalFlex</div>
+              <select style={S.select} value={instance.properties.VerticalFlex || 'None'} onChange={(e) => onUpdateProp(instance.id, 'VerticalFlex', e.target.value)}>
+                {['None', 'Fill', 'SpaceAround', 'SpaceBetween', 'SpaceEvenly'].map((v) => <option key={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>Wraps</div>
+              <select style={S.select} value={String(instance.properties.Wraps ?? false)} onChange={(e) => onUpdateProp(instance.id, 'Wraps', e.target.value === 'true')}>
+                <option value="false">false</option><option value="true">true</option>
+              </select>
+            </div>
           </div>
         </div>
       )}
 
       {instance.rbxClass === 'UICorner' && (
         <div style={S.card}>
-          <label style={S.label}>CornerRadius</label>
+          <label style={S.label}>UICorner</label>
+          <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 6 }}>CornerRadius (uniform)</div>
           <input style={S.input} value={instance.properties.CornerRadius || ''} onChange={(e) => onUpdateProp(instance.id, 'CornerRadius', e.target.value)} placeholder="UDim.new(0,8)" />
+          <div style={{ fontSize: 9, color: '#7c8499', margin: '10px 0 6px' }}>Individual corners (beta, optional)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {[['TopLeftRadius', 'Top Left'], ['TopRightRadius', 'Top Right'], ['BottomLeftRadius', 'Bottom Left'], ['BottomRightRadius', 'Bottom Right']].map(([key, label]) => (
+              <div key={key}>
+                <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>{label}</div>
+                <input style={S.input} value={instance.properties[key] || ''} onChange={(e) => onUpdateProp(instance.id, key, e.target.value)} placeholder="UDim.new(0,8)" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {instance.rbxClass === 'UIShadow' && (
+        <div style={S.card}>
+          <label style={S.label}>UIShadow (beta)</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>BlurRadius</div><input style={S.input} value={instance.properties.BlurRadius || ''} onChange={(e) => onUpdateProp(instance.id, 'BlurRadius', e.target.value)} placeholder="UDim.new(0,12)" /></div>
+            <div><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>Offset</div><input style={S.input} value={instance.properties.Offset || ''} onChange={(e) => onUpdateProp(instance.id, 'Offset', e.target.value)} placeholder="UDim2.new(0,4,0,4)" /></div>
+            <div><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>Spread</div><input type="number" style={S.input} value={instance.properties.Spread ?? 0} onChange={(e) => onUpdateProp(instance.id, 'Spread', Number(e.target.value))} /></div>
+            <div><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>Transparency</div><input type="number" min={0} max={1} step={0.05} style={S.input} value={instance.properties.Transparency ?? 0.5} onChange={(e) => onUpdateProp(instance.id, 'Transparency', Number(e.target.value))} /></div>
+            <div style={{ gridColumn: '1 / -1' }}><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>Color</div><input style={S.input} value={instance.properties.Color || ''} onChange={(e) => onUpdateProp(instance.id, 'Color', e.target.value)} placeholder="{ R:0, G:0, B:0 }" /></div>
+          </div>
+        </div>
+      )}
+
+      {instance.rbxClass === 'Path2D' && (
+        <div style={S.card}>
+          <label style={S.label}>Path2D (beta)</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>Color3</div><input style={S.input} value={instance.properties.Color3 || ''} onChange={(e) => onUpdateProp(instance.id, 'Color3', e.target.value)} placeholder="{ R:255, G:255, B:255 }" /></div>
+            <div><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>Thickness</div><input type="number" style={S.input} value={instance.properties.Thickness ?? 2} onChange={(e) => onUpdateProp(instance.id, 'Thickness', Number(e.target.value))} /></div>
+          </div>
         </div>
       )}
 
@@ -1225,6 +1401,8 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>FlexMode</div><select style={S.select} value={instance.properties.FlexMode || 'Fill'} onChange={(e) => onUpdateProp(instance.id, 'FlexMode', e.target.value)}>{['Fill','Shrink','Grow','Custom'].map((v) => <option key={v}>{v}</option>)}</select></div>
             <div><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>GrowRatio</div><input type="number" style={S.input} value={instance.properties.GrowRatio ?? 1} onChange={(e) => onUpdateProp(instance.id, 'GrowRatio', Number(e.target.value))} /></div>
+            <div><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>ShrinkRatio</div><input type="number" style={S.input} value={instance.properties.ShrinkRatio ?? 1} onChange={(e) => onUpdateProp(instance.id, 'ShrinkRatio', Number(e.target.value))} /></div>
+            <div><div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>ItemLineAlignment</div><select style={S.select} value={instance.properties.ItemLineAlignment || 'Automatic'} onChange={(e) => onUpdateProp(instance.id, 'ItemLineAlignment', e.target.value)}>{['Automatic','Start','Center','End','Stretch'].map((v) => <option key={v}>{v}</option>)}</select></div>
           </div>
         </div>
       )}

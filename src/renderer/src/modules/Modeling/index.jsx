@@ -1,6 +1,6 @@
 /* eslint-disable react/prop-types */
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Settings, Play, Compass, Sparkles, User } from 'lucide-react'
+import { Settings, Play, Compass, Sparkles, User, RefreshCw, Link2 } from 'lucide-react'
 import PartsList from './PartsList'
 import R15Viewer from './R15Viewer'
 import SceneBuilder from './SceneBuilder'
@@ -71,6 +71,14 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
   const [aiFillStyle, setAiFillStyle] = useState('Generic')
   const [aiFillBusy, setAiFillBusy] = useState(false)
   const [aiFillError, setAiFillError] = useState('')
+  const [tripoSession, setTripoSession] = useState({
+    checked: false,
+    loading: true,
+    connected: false,
+    loginDetected: false,
+    error: null,
+    message: ''
+  })
 
   useEffect(() => {
     let active = true
@@ -83,8 +91,9 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
       window.api.configGet('tripoStyle'),
       window.api.configGet('tripoTexture'),
       window.api.configGet('tripoPbr'),
-      window.api.configGet('tripoSmartLowPoly')
-    ]).then(([baseUrl, generateUrl, showBrowser, modelVersion, style, texture, pbr, smartLowPoly]) => {
+      window.api.configGet('tripoSmartLowPoly'),
+      window.api.configGet('tripoDownloadFormat')
+    ]).then(([baseUrl, generateUrl, showBrowser, modelVersion, style, texture, pbr, smartLowPoly, downloadFormat]) => {
       if (!active) return
       setTripoOpts((prev) => ({
         ...prev,
@@ -95,7 +104,8 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
         style: style ?? prev.style,
         texture: typeof texture === 'boolean' ? texture : prev.texture,
         pbr: typeof pbr === 'boolean' ? pbr : prev.pbr,
-        smartLowPoly: typeof smartLowPoly === 'boolean' ? smartLowPoly : prev.smartLowPoly
+        smartLowPoly: typeof smartLowPoly === 'boolean' ? smartLowPoly : prev.smartLowPoly,
+        downloadFormat: downloadFormat || prev.downloadFormat
       }))
     })
 
@@ -244,6 +254,86 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
     )
   }, [tripoOpts.webBaseUrl, tripoOpts.webGenerateUrl])
 
+  const refreshTripoSession = useCallback(
+    async ({ autoSync = false } = {}) => {
+      if (!window.api?.tripoWebSessionStatus) return null
+
+      setTripoSession((prev) => ({
+        ...prev,
+        loading: true,
+        error: null,
+        message: 'Checking Tripo browser session…'
+      }))
+
+      const res = await window.api.tripoWebSessionStatus({
+        baseUrl: tripoOpts.webBaseUrl,
+        generateUrl: tripoOpts.webGenerateUrl
+      })
+
+      const next = {
+        checked: true,
+        loading: false,
+        connected: Boolean(res?.success && res.connected),
+        loginDetected: Boolean(res?.loginDetected),
+        error: res?.success === false ? res.error || 'Session check failed.' : null,
+        message: !res?.success
+          ? res?.error || 'Could not inspect the Tripo website session.'
+          : res.connected
+            ? 'Connected — in-app Tripo session is ready.'
+            : res.loginDetected
+              ? 'Login required — connect your Tripo account in the in-app browser.'
+              : 'Disconnected — session found but workspace was not detected.'
+      }
+
+      setTripoSession(next)
+
+      if (autoSync && next.connected) {
+        await syncTripoHistory()
+      }
+
+      return next
+    },
+    [syncTripoHistory, tripoOpts.webBaseUrl, tripoOpts.webGenerateUrl]
+  )
+
+  const openTripoLogin = useCallback(async () => {
+    if (!window.api?.tripoWebOpenLogin) return
+    setTripoSession((prev) => ({
+      ...prev,
+      loading: true,
+      message: 'Opening Tripo login window…'
+    }))
+    const res = await window.api.tripoWebOpenLogin({
+      baseUrl: tripoOpts.webBaseUrl
+    })
+    if (!res?.success) {
+      setTripoSession((prev) => ({
+        ...prev,
+        loading: false,
+        error: res?.error || 'Could not open the Tripo login window.',
+        message: res?.error || 'Could not open the Tripo login window.'
+      }))
+      return
+    }
+    setTripoSession((prev) => ({
+      ...prev,
+      loading: false,
+      message: 'Sign in through the Tripo popup, then click Check Session.'
+    }))
+  }, [tripoOpts.webBaseUrl])
+
+  useEffect(() => {
+    let active = true
+    const timer = window.setTimeout(async () => {
+      if (!active) return
+      await refreshTripoSession({ autoSync: true })
+    }, 400)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [refreshTripoSession])
+
   const parts = tab === 'character' ? charParts : envParts
   const setParts = tab === 'character' ? setCharParts : setEnvParts
 
@@ -325,6 +415,21 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
           return prev
         })
         return result
+      }
+
+      if (!tripoSession.connected) {
+        const latest = await refreshTripoSession()
+        if (!latest?.connected) {
+          const sessionHint = latest?.loginDetected ?? tripoSession.loginDetected
+            ? 'Tripo login required. Click Connect Account in the header, sign in through the Tripo popup, then try again.'
+            : 'Tripo session not connected. Click Check Session in the header or connect in Settings → Tripo.'
+          setter((prev) =>
+            prev.map((part) =>
+              part.id === id ? { ...part, status: 'error', error: sessionHint } : part
+            )
+          )
+          return
+        }
       }
 
       setter((prev) =>
@@ -411,7 +516,7 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
         )
       }
     },
-    [loadWorkspaceAssets, tab, tripoOpts]
+    [loadWorkspaceAssets, refreshTripoSession, tab, tripoOpts, tripoSession]
   )
 
   const aiFillEnvironment = useCallback(async () => {
@@ -454,6 +559,12 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
   }, [aiFillDesc, aiFillStyle])
 
   const generateAllPending = useCallback(async () => {
+    let sessionOk = tripoSession.connected
+    if (!sessionOk) {
+      const latest = await refreshTripoSession()
+      sessionOk = Boolean(latest?.connected)
+      if (!sessionOk) return
+    }
     const pending = parts.filter(
       (part) =>
         part.status !== 'generating' &&
@@ -463,7 +574,25 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
     for (const part of pending) {
       await generatePart(part.id)
     }
-  }, [generatePart, parts])
+  }, [generatePart, parts, refreshTripoSession, tripoSession.connected])
+
+  const tripoSessionLabel = tripoSession.loading
+    ? 'Checking…'
+    : tripoSession.connected
+      ? 'Connected'
+      : tripoSession.loginDetected
+        ? 'Login Required'
+        : tripoSession.checked
+          ? 'Disconnected'
+          : 'Unknown'
+
+  const tripoSessionBadgeClass = tripoSession.loading
+    ? 'bg-amber-500/10 border-amber-500/25 text-amber-300'
+    : tripoSession.connected
+      ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+      : tripoSession.loginDetected
+        ? 'bg-amber-500/10 border-amber-500/25 text-amber-300'
+        : 'bg-slate-800 border-slate-700 text-slate-500'
 
   const pickReferenceImage = useCallback(
     async (id, slot) => {
@@ -639,8 +768,16 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
         tab === 'character' ? 'Imported Generated Accessory' : 'Imported Generated Scene Part'
 
       try {
+        const isTripoRemoteAsset =
+          asset.provider === 'tripo-history' ||
+          asset.provider === 'tripo-web' ||
+          String(asset.provider || '').startsWith('tripo-web') ||
+          /tripo3d\.ai/i.test(String(asset.detailUrl || '')) ||
+          /tripo3d\.ai/i.test(String(asset.downloadUrl || ''))
+
         const needsRemoteImport =
           !outputPath &&
+          isTripoRemoteAsset &&
           (asset.id || asset.detailUrl || asset.downloadUrl) &&
           (window.api.tripoImportSyncedAssetById || window.api.tripoWebImportHistoryItem)
 
@@ -649,17 +786,24 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
           if (asset.id && window.api.tripoImportSyncedAssetById) {
             importRes = await window.api.tripoImportSyncedAssetById({
               id: asset.id,
-              name: asset.name || defaultName,
-              prompt: asset.prompt || '',
-              sourceTab: tab
-            })
-          } else if (window.api.tripoWebImportHistoryItem) {
-            importRes = await window.api.tripoWebImportHistoryItem({
               detailUrl: asset.detailUrl || '',
               downloadUrl: asset.downloadUrl || '',
               name: asset.name || defaultName,
               prompt: asset.prompt || '',
               sourceTab: tab
+            })
+          }
+          if (
+            (!importRes?.success || !importRes.item?.outputPath) &&
+            window.api.tripoWebImportHistoryItem
+          ) {
+            importRes = await window.api.tripoWebImportHistoryItem({
+              detailUrl: asset.detailUrl || '',
+              downloadUrl: asset.downloadUrl || '',
+              name: asset.name || defaultName,
+              prompt: asset.prompt || '',
+              sourceTab: tab,
+              tripoAssetId: asset.id || null
             })
           }
 
@@ -779,6 +923,43 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
           </div>
 
           <div className="flex gap-2 items-center">
+            <div className="flex items-center gap-2 mr-1">
+              <span
+                className={`text-[9px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border flex items-center gap-1.5 ${tripoSessionBadgeClass}`}
+                title={tripoSession.message || 'Tripo in-app browser session'}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    tripoSession.loading
+                      ? 'bg-amber-400 animate-pulse'
+                      : tripoSession.connected
+                        ? 'bg-emerald-400 shadow-[0_0_6px_#4ade80]'
+                        : tripoSession.loginDetected
+                          ? 'bg-amber-400'
+                          : 'bg-slate-500'
+                  }`}
+                />
+                Tripo {tripoSessionLabel}
+              </span>
+              {!tripoSession.connected && (
+                <button
+                  onClick={openTripoLogin}
+                  disabled={tripoSession.loading}
+                  className="px-3 py-2 text-[11px] font-bold rounded-full border border-purple-500/35 bg-purple-500/10 text-purple-200 hover:bg-purple-500/20 transition-all duration-200 cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+                >
+                  <Link2 size={12} />
+                  Connect
+                </button>
+              )}
+              <button
+                onClick={() => refreshTripoSession({ autoSync: tripoSession.connected })}
+                disabled={tripoSession.loading}
+                className="px-3 py-2 text-[11px] font-bold rounded-full border border-white/[0.08] bg-white/[0.03] text-slate-400 hover:text-slate-200 hover:bg-white/[0.08] transition-all duration-200 cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+              >
+                <RefreshCw size={12} className={tripoSession.loading ? 'animate-spin' : ''} />
+                Check
+              </button>
+            </div>
             <button
               onClick={() => onChangeModule?.('settings')}
               className="px-4 py-2 text-xs font-bold rounded-full border border-white/[0.08] bg-white/[0.03] text-slate-300 hover:border-slate-600 hover:bg-white/[0.08] transition-all duration-200 cursor-pointer flex items-center gap-1.5 hover:scale-[1.02] active:scale-[0.98] shadow-sm backdrop-blur-md"
@@ -795,6 +976,15 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
             </button>
           </div>
         </div>
+
+        {!tripoSession.loading && tripoSession.checked && !tripoSession.connected && (
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3.5 py-2.5 text-[11px] text-amber-200/90 leading-relaxed">
+            {tripoSession.loginDetected
+              ? 'Sign in through the in-app Tripo browser (Connect), not an external browser. After login, click Check Session.'
+              : tripoSession.message ||
+                'Tripo session is not ready. Open Settings → Tripo or use Connect Account above.'}
+          </div>
+        )}
 
         {globalProgress && (
           <div className="bg-purple-500/5 border border-purple-500/15 p-2.5 rounded-xl">
@@ -931,6 +1121,9 @@ export default function ModelingModule({ workflowState, setWorkflowState, onChan
               recentlyRemoved?.tab === tab ? recentlyRemoved.part : null
             }
             onUndoRemove={restoreRecentlyRemoved}
+            tripoSessionConnected={tripoSession.connected}
+            tripoSessionLoading={tripoSession.loading}
+            tripoSessionLoginRequired={tripoSession.loginDetected}
           />
         </div>
 

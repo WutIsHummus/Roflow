@@ -135,7 +135,8 @@ export function interpolateNumberAtTime(keypoints, t) {
 }
 
 function hexToRgb(hex) {
-  const normalized = hex.replace('#', '')
+  const normalized = String(hex || '#64748b').replace('#', '')
+  if (normalized.length !== 6) return { r: 100, g: 116, b: 139 }
   return {
     r: parseInt(normalized.slice(0, 2), 16),
     g: parseInt(normalized.slice(2, 4), 16),
@@ -184,7 +185,8 @@ export function numberSequenceGradientCss(keypoints, minValue, maxValue, color =
   const stops = sorted
     .map((kp) => {
       const alpha = clamp(0.15 + ((kp.value - minValue) / range) * 0.85, 0.1, 1)
-      return `rgba(100,116,139,${alpha.toFixed(2)}) ${(kp.time * 100).toFixed(1)}%`
+      const rgb = hexToRgb(color)
+      return `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(2)}) ${(kp.time * 100).toFixed(1)}%`
     })
     .join(', ')
   return `linear-gradient(to right, ${stops})`

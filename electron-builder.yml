@@ -10,6 +10,9 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
 asarUnpack:
   - resources/**
+extraResources:
+  - from: plugins/roblox/RoflowVFX
+    to: roblox-plugin/RoflowVFX
 win:
   executableName: ai-game-dev-hub
 nsis:

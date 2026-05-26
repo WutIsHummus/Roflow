@@ -16,8 +16,8 @@ import {
   normName
 } from '../Modeling/r15Utils'
 import {
-  configureClassicClothingTexture,
-  createClassicClothingMaterial
+  createClassicClothingMaterial,
+  loadClassicClothingTexture
 } from './classicClothingTexture.js'
 import {
   prepareClassicClothingGeometry,
@@ -1028,34 +1028,26 @@ function WorkflowViewport({ previewTab, animationResult, clothingWorkflow, acces
         return
       }
 
-      const textureLoader = new THREE.TextureLoader()
       const overlays = []
 
       async function loadSlotTexture(source, assetType, renderOrderOffset) {
-        return new Promise((resolve) => {
-          textureLoader.load(
-            source,
-            (texture) => {
-              if (cancelled) {
-                texture.dispose()
-                resolve([])
-                return
-              }
-
-              configureClassicClothingTexture(texture)
-              const slotOverlays = applyClothingTextureToRig(
-                s,
-                texture,
-                assetType,
-                renderOrderOffset
-              )
-              overlays.push(...slotOverlays)
-              resolve(slotOverlays)
-            },
-            undefined,
-            () => resolve([])
+        try {
+          const texture = await loadClassicClothingTexture(source, assetType)
+          if (cancelled) {
+            texture.dispose()
+            return []
+          }
+          const slotOverlays = applyClothingTextureToRig(
+            s,
+            texture,
+            assetType,
+            renderOrderOffset
           )
-        })
+          overlays.push(...slotOverlays)
+          return slotOverlays
+        } catch {
+          return []
+        }
       }
 
       if (shirtSource) await loadSlotTexture(shirtSource, 'shirt', 1)
@@ -1359,7 +1351,9 @@ function applyClothingTextureToRig(state, texture, assetType, renderOrderOffset 
     const partName = resolveClothingPartName(obj)
     const geometry = prepareClassicClothingGeometry(obj.geometry, assetType, partName)
     const material = createClassicClothingMaterial(texture)
-    const overlay = new THREE.Mesh(geometry, material)
+
+    const isSkinned = obj.isSkinnedMesh && obj.skeleton
+    const overlay = isSkinned ? new THREE.SkinnedMesh(geometry, material) : new THREE.Mesh(geometry, material)
     overlay.name = `__clothing_overlay_${assetType || 'shirt'}_${obj.name}`
     overlay.renderOrder = (obj.renderOrder || 0) + renderOrderOffset
     overlay.castShadow = false
@@ -1369,6 +1363,11 @@ function applyClothingTextureToRig(state, texture, assetType, renderOrderOffset 
     overlay.quaternion.copy(obj.quaternion)
     overlay.scale.copy(obj.scale)
     obj.parent?.add(overlay)
+
+    if (isSkinned) {
+      overlay.bind(obj.skeleton, obj.bindMatrix)
+    }
+
     overlays.push({ mesh: overlay, material, geometry, texture })
   })
 

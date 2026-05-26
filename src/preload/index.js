@@ -21,6 +21,7 @@ const api = {
   readTextFile: (opts) => ipcRenderer.invoke('fs:readTextFile', opts),
   writeTextFile: (opts) => ipcRenderer.invoke('fs:writeTextFile', opts),
   exportVfxPackage: (opts) => ipcRenderer.invoke('vfx:exportPackage', opts),
+  vfxInstallStudioPlugin: () => ipcRenderer.invoke('vfx:installStudioPlugin'),
   vfxGenerateRecipe: (opts) => ipcRenderer.invoke('vfx:generateRecipe', opts),
   vfxGenerateParticleLogic: (opts) => ipcRenderer.invoke('vfx:generateParticleLogic', opts),
   sfxGenerateRecipe: (opts) => ipcRenderer.invoke('sfx:generateRecipe', opts),
