@@ -187,6 +187,12 @@ const MODELS = [
     label: 'HY-Motion 1.0 Lite',
     desc: 'Smaller 460M model — faster generation, slightly lower quality.',
     badge: null
+  },
+  {
+    id: 'hymotion-zerogpu',
+    label: '🔥 HY-Motion 1.0 ZeroGPU',
+    desc: 'Runs on Hugging Face Spaces ZeroGPU queue — slower, no dedicated GPU required.',
+    badge: 'ZERO GPU'
   }
 ]
 
@@ -213,6 +219,13 @@ export default function TextToAnimation({
   const { prompt, model, duration } = textForm
   const loading = activeJob?.type === 'text' && activeJob?.status === 'running'
   const [focusTA, setFocusTA] = useState(false)
+  const isHyMotionModel = model === 'hymotion' || model === 'hymotion-lite' || model === 'hymotion-zerogpu'
+  const hyMotionModelLabel =
+    model === 'hymotion-lite'
+      ? 'HY-Motion 1.0 Lite'
+      : model === 'hymotion-zerogpu'
+        ? 'HY-Motion 1.0 ZeroGPU'
+        : 'HY-Motion 1.0'
 
   async function generate() {
     if (!prompt.trim()) return
@@ -421,7 +434,7 @@ export default function TextToAnimation({
           </div>
         )}
 
-        {(model === 'hymotion' || model === 'hymotion-lite') && (
+        {isHyMotionModel && (
           <div
             style={{
               background: 'rgba(124,58,237,0.06)',
@@ -439,12 +452,12 @@ export default function TextToAnimation({
           >
             <Sparkles size={14} className="text-purple-400 flex-shrink-0" />
             <div>
-              <strong style={{ color: '#c4b5fd' }}>
-                HY-Motion 1.0{model === 'hymotion-lite' ? ' Lite' : ''}
-              </strong>{' '}
+              <strong style={{ color: '#c4b5fd' }}>{hyMotionModelLabel}</strong>{' '}
               text-to-motion engine ·{' '}
               <span style={{ color: '#64748b' }}>
-                Tencent&apos;s motion model optimized for Roblox-ready BVH export
+                {model === 'hymotion-zerogpu'
+                  ? "Tencent's motion model via Hugging Face Spaces ZeroGPU queue for Roblox-ready BVH export"
+                  : "Tencent's motion model optimized for Roblox-ready BVH export"}
               </span>
             </div>
           </div>

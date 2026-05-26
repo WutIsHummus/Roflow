@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CONFIG_KEYS } from '../../../../shared/configKeys.js'
 import { useConfigKey } from '../../hooks/useConfigKey.js'
+import ClassicClothingPreview from './ClassicClothingPreview'
 import {
   Shirt,
   Settings,
@@ -31,6 +32,11 @@ const DEFAULT_WORKFLOW = {
   pantsResultDataUrl: null,
   resultPath: null,
   resultDataUrl: null,
+  assets: {
+    shirt: null,
+    pants: null,
+    outfit: null
+  },
   seed: '',
   lastPrompt: ''
 }
@@ -168,7 +174,7 @@ function buildPromptPack(workflow) {
 
   const designBrief = [
     `User clothing request: ${workflow.designPrompt || 'Create a clean Roblox classic clothing texture.'}`,
-    `Asset target: Roblox classic ${workflow.assetType}.`,
+    `Asset target: Roblox classic ${workflow.assetType === 'outfit' ? 'shirt and pants outfit' : workflow.assetType}.`,
     workflow.colorPalette ? `Color palette: ${workflow.colorPalette}` : null,
     workflow.materialNotes ? `Material notes: ${workflow.materialNotes}` : null,
     workflow.styleNotes ? `Style notes: ${workflow.styleNotes}` : null,
@@ -193,7 +199,7 @@ function buildPromptPack(workflow) {
     'Roblox Classic Clothing Prompt Pack',
     '',
     `Model: ${REPLICATE_MODEL}`,
-    `Asset type: ${workflow.assetType}`,
+    `Asset type: ${workflow.assetType === 'outfit' ? 'shirt and pants outfit' : workflow.assetType}`,
     workflow.colorPalette ? `Palette: ${workflow.colorPalette}` : null,
     workflow.materialNotes ? `Material notes: ${workflow.materialNotes}` : null,
     workflow.styleNotes ? `Style notes: ${workflow.styleNotes}` : null,
@@ -691,6 +697,11 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
     }
 
     const dataUrlResult = await window.api.readFileAsDataURL({ filePath: result.outputPath })
+    const nextAsset = {
+      resultPath: result.outputPath,
+      resultDataUrl: dataUrlResult.success ? dataUrlResult.dataUrl : null,
+      lastPrompt: promptPack.finalPrompt
+    }
     setProgress(null)
     const slot = workflow.assetType || 'shirt'
     const { path, dataUrl } = clothingSlotKeys(slot)
@@ -700,7 +711,11 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
       [dataUrl]: dataUrlResult.success ? dataUrlResult.dataUrl : null,
       resultPath: result.outputPath,
       resultDataUrl: dataUrlResult.success ? dataUrlResult.dataUrl : null,
-      lastPrompt: promptPack.finalPrompt
+      lastPrompt: promptPack.finalPrompt,
+      assets: {
+        ...(workflow.assets || {}),
+        [workflow.assetType]: nextAsset
+      }
     })
     setNotice(`${slot === 'pants' ? 'Pants' : 'Shirt'} texture generated.`)
   }, [promptPack.finalPrompt, replicateToken, updateWorkflow, workflow.assetType, workflow.designPrompt, workflow.seed, workflow.templateDataUrl, workflow.templateImagePath])
@@ -1086,6 +1101,19 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div style={{ ...styles.card, marginTop: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>
+              Character Preview
+            </div>
+            <ClassicClothingPreview
+              shirtDataUrl={shirtSlotPaths.resultDataUrl || workflow.assets?.outfit?.resultDataUrl}
+              pantsDataUrl={pantsSlotPaths.resultDataUrl || workflow.assets?.outfit?.resultDataUrl}
+            />
+            <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.6, marginTop: 10 }}>
+              This preview maps the generated template panels onto the bundled Roblox R15 rig so you can inspect the clothing before sending it to Playground.
             </div>
           </div>
         </div>
