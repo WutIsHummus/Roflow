@@ -10,6 +10,7 @@ import {
   canonicalizeMotionClip,
   canonicalizeMotionSkeleton
 } from '../Modeling/r15Utils'
+import { R15_RIG_URL } from '../../shared/r15ClothingOverlay.js'
 
 export default function AnimationPreview({ bvhPath }) {
   const mountRef = useRef(null)
@@ -95,7 +96,7 @@ export default function AnimationPreview({ bvhPath }) {
 
     const loader = new GLTFLoader()
     loader.load(
-      '/r15_rig.glb',
+      R15_RIG_URL,
       (gltf) => {
         rigGroup.add(gltf.scene)
         gltf.scene.traverse((obj) => {

@@ -61,39 +61,39 @@ const RIG_ATLAS_CELLS = {
   },
   leftArm: {
     UP: { x: 390, y: 2, w: 64, h: 64 },
-    R: { x: 390, y: 66, w: 64, h: 128 },
-    F: { x: 454, y: 66, w: 64, h: 128 },
-    L: { x: 518, y: 66, w: 64, h: 128 },
-    B: { x: 582, y: 66, w: 64, h: 128 },
+    R: { x: 390, y: 66, w: 64, h: 147 },
+    F: { x: 454, y: 66, w: 64, h: 147 },
+    L: { x: 518, y: 66, w: 64, h: 147 },
+    B: { x: 582, y: 66, w: 64, h: 147 },
     DOWN: { x: 582, y: 218, w: 64, h: 64 }
   },
   rightArm: {
     UP: { x: 654, y: 2, w: 64, h: 64 },
-    R: { x: 654, y: 66, w: 64, h: 128 },
-    F: { x: 718, y: 66, w: 64, h: 128 },
-    L: { x: 782, y: 66, w: 64, h: 128 },
-    B: { x: 846, y: 66, w: 64, h: 128 },
+    R: { x: 654, y: 66, w: 64, h: 147 },
+    F: { x: 718, y: 66, w: 64, h: 147 },
+    L: { x: 782, y: 66, w: 64, h: 147 },
+    B: { x: 846, y: 66, w: 64, h: 147 },
     DOWN: { x: 846, y: 218, w: 64, h: 64 }
   },
   leftLeg: {
-    UP: { x: 390, y: 340, w: 64, h: 64 },
-    R: { x: 390, y: 404, w: 64, h: 128 },
-    F: { x: 454, y: 404, w: 64, h: 128 },
-    L: { x: 518, y: 404, w: 64, h: 128 },
-    B: { x: 582, y: 404, w: 64, h: 128 },
-    DOWN: { x: 582, y: 532, w: 64, h: 64 }
+    UP: { x: 390, y: 286, w: 64, h: 64 },
+    R: { x: 390, y: 350, w: 64, h: 215 },
+    F: { x: 454, y: 350, w: 64, h: 215 },
+    L: { x: 518, y: 350, w: 64, h: 215 },
+    B: { x: 582, y: 350, w: 64, h: 215 },
+    DOWN: { x: 582, y: 502, w: 64, h: 64 }
   },
   rightLeg: {
-    UP: { x: 654, y: 340, w: 64, h: 64 },
-    R: { x: 654, y: 404, w: 64, h: 128 },
-    F: { x: 718, y: 404, w: 64, h: 128 },
-    L: { x: 782, y: 404, w: 64, h: 128 },
-    B: { x: 846, y: 404, w: 64, h: 128 },
-    DOWN: { x: 846, y: 532, w: 64, h: 64 }
+    UP: { x: 654, y: 286, w: 64, h: 64 },
+    R: { x: 654, y: 350, w: 64, h: 215 },
+    F: { x: 718, y: 350, w: 64, h: 215 },
+    L: { x: 782, y: 350, w: 64, h: 215 },
+    B: { x: 846, y: 350, w: 64, h: 215 },
+    DOWN: { x: 846, y: 502, w: 64, h: 64 }
   }
 }
 
-const FACE_ORDER = ['UP', 'DOWN', 'F', 'B', 'L', 'R']
+const FACE_ORDER = ['R', 'F', 'L', 'B', 'UP', 'DOWN']
 
 function drawCross(ctx, image, srcCross, dstCross) {
   if (!srcCross || !dstCross) return
@@ -135,6 +135,10 @@ export function buildRigAtlasFromClassicTemplate(image, assetType) {
     drawCross(ctx, image, ROBLOX_TEMPLATE_CELLS.leftLimb, RIG_ATLAS_CELLS.leftArm)
     // Template bottom-LEFT cross ("RIGHT ARM" = character's right arm) → rig right arm
     drawCross(ctx, image, ROBLOX_TEMPLATE_CELLS.rightLimb, RIG_ATLAS_CELLS.rightArm)
+  }
+
+  if (import.meta.env.DEV) {
+    console.log(`[clothing debug] ${assetType} atlas canvas:`, canvas.toDataURL('image/png'))
   }
 
   return canvas

@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { ROBLOX_ATTACH, buildAttachmentAnchors, dataUrlToArrayBuffer } from './r15Utils'
+import { R15_RIG_URL } from '../../shared/r15ClothingOverlay.js'
 
 export default function R15Viewer({ accessories = [] }) {
   const mountRef = useRef(null)
@@ -60,7 +61,7 @@ export default function R15Viewer({ accessories = [] }) {
 
     const loader = new GLTFLoader()
     loader.load(
-      '/r15_rig.glb',
+      R15_RIG_URL,
       (gltf) => {
         rigGroup.add(gltf.scene)
         stateRef.current.rigScene = gltf.scene

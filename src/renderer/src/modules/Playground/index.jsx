@@ -15,14 +15,12 @@ import {
   dataUrlToArrayBuffer,
   normName
 } from '../Modeling/r15Utils'
+import { loadClassicClothingTexture } from './classicClothingTexture.js'
 import {
-  createClassicClothingMaterial,
-  loadClassicClothingTexture
-} from './classicClothingTexture.js'
-import {
-  prepareClassicClothingGeometry,
-  resolveClothingPartName
-} from './classicClothingUv.js'
+  R15_RIG_URL,
+  applyClothingTextureToRig,
+  clearClothingOverlays
+} from '../../shared/r15ClothingOverlay.js'
 
 const CLOTHING_ASSET_TYPES = ['shirt', 'pants']
 
@@ -857,7 +855,7 @@ function WorkflowViewport({ previewTab, animationResult, clothingWorkflow, acces
 
     const loader = new GLTFLoader()
     loader.load(
-      '/r15_rig.glb',
+      R15_RIG_URL,
       (gltf) => {
         rigGroup.add(gltf.scene)
         gltf.scene.traverse((obj) => {
@@ -1341,39 +1339,6 @@ async function resolveClothingSlotTextureSource(workflow, assetType) {
   return result.success ? result.dataUrl : null
 }
 
-function applyClothingTextureToRig(state, texture, assetType, renderOrderOffset = 1) {
-  if (!state?.rigScene || !texture) return []
-
-  const overlays = []
-  state.rigScene.traverse((obj) => {
-    if (!isClothingBodyMesh(obj) || !isClothingTargetMesh(obj, assetType)) return
-
-    const partName = resolveClothingPartName(obj)
-    const geometry = prepareClassicClothingGeometry(obj.geometry, assetType, partName)
-    const material = createClassicClothingMaterial(texture)
-
-    const isSkinned = obj.isSkinnedMesh && obj.skeleton
-    const overlay = isSkinned ? new THREE.SkinnedMesh(geometry, material) : new THREE.Mesh(geometry, material)
-    overlay.name = `__clothing_overlay_${assetType || 'shirt'}_${obj.name}`
-    overlay.renderOrder = (obj.renderOrder || 0) + renderOrderOffset
-    overlay.castShadow = false
-    overlay.receiveShadow = false
-    overlay.frustumCulled = false
-    overlay.position.copy(obj.position)
-    overlay.quaternion.copy(obj.quaternion)
-    overlay.scale.copy(obj.scale)
-    obj.parent?.add(overlay)
-
-    if (isSkinned) {
-      overlay.bind(obj.skeleton, obj.bindMatrix)
-    }
-
-    overlays.push({ mesh: overlay, material, geometry, texture })
-  })
-
-  return overlays
-}
-
 function isClothingBodyMesh(obj) {
   return Boolean(obj?.isMesh && !obj.name.startsWith('__clothing_overlay_'))
 }
@@ -1422,25 +1387,6 @@ function focusScene(state) {
   state.orbit.target.copy(center)
   state.camera.position.set(center.x, center.y + maxDim * 0.45, center.z + maxDim * 1.7 + 1.4)
   state.camera.lookAt(center)
-}
-
-function clearClothingOverlays(state) {
-  if (!state?.clothingOverlays?.length) {
-    state.clothingOverlays = []
-    return
-  }
-
-  const disposedTextures = new Set()
-  for (const overlay of state.clothingOverlays) {
-    overlay.mesh.parent?.remove(overlay.mesh)
-    overlay.material?.dispose()
-    overlay.geometry?.dispose()
-    if (overlay.texture && !disposedTextures.has(overlay.texture)) {
-      overlay.texture.dispose()
-      disposedTextures.add(overlay.texture)
-    }
-  }
-  state.clothingOverlays = []
 }
 
 function isClothingTargetMesh(object, assetType) {

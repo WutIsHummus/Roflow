@@ -260,7 +260,7 @@ const styles = {
   body: { 
     flex: 1, 
     display: 'grid', 
-    gridTemplateColumns: '360px 1fr 360px', 
+    gridTemplateColumns: '360px 1fr', 
     minHeight: 0 
   },
   rail: { 
@@ -272,12 +272,6 @@ const styles = {
   center: { 
     padding: 24, 
     overflowY: 'auto' 
-  },
-  pack: { 
-    borderLeft: '1px solid rgba(255,255,255,0.05)', 
-    padding: '20px 16px', 
-    overflowY: 'auto',
-    background: 'rgba(0,0,0,0.08)'
   },
   card: {
     background: 'rgba(16, 19, 28, 0.4)',
@@ -754,6 +748,12 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
             >
               <Upload size={13} /> {busy === 'import' ? 'Importing…' : 'Import PNG'}
             </button>
+            <button
+              className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
+              onClick={copyPromptForProvider}
+            >
+              <Copy size={13} /> Copy Prompt
+            </button>
             <button 
               className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
               onClick={exportPromptPack}
@@ -1105,63 +1105,16 @@ export default function ClothingModule({ workflowState, setWorkflowState, onChan
           </div>
 
           <div style={{ ...styles.card, marginTop: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#eef0f6', marginBottom: 10 }}>
+            <div className="text-xs font-extrabold text-slate-200 uppercase tracking-wide mb-2">
               Character Preview
             </div>
             <ClassicClothingPreview
               shirtDataUrl={shirtSlotPaths.resultDataUrl || workflow.assets?.outfit?.resultDataUrl}
               pantsDataUrl={pantsSlotPaths.resultDataUrl || workflow.assets?.outfit?.resultDataUrl}
             />
-            <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.6, marginTop: 10 }}>
+            <p className="text-[11px] text-slate-400 leading-relaxed font-medium mt-2.5">
               This preview maps the generated template panels onto the bundled Roblox R15 rig so you can inspect the clothing before sending it to Playground.
-            </div>
-          </div>
-        </div>
-
-        <div style={styles.pack}>
-          <div style={{ ...styles.card, marginBottom: 14 }}>
-            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">
-              Final Prompt
-            </div>
-            <textarea
-              readOnly
-              rows={14}
-              style={{ ...styles.textarea, color: '#d1d5db' }}
-              value={promptPack.finalPrompt || 'Fill in the design prompt to build a prompt.'}
-              className="focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 focus:bg-slate-950/80 hover:border-slate-800 transition-all duration-200 font-mono text-[11px] leading-relaxed"
-            />
-            <div className="flex gap-2 mt-3 flex-wrap">
-              <button 
-                className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
-                onClick={copyPromptForProvider}
-              >
-                <Copy size={13} /> Copy Prompt
-              </button>
-              <button 
-                className="px-4 py-2 text-xs font-bold rounded-lg border border-purple-500/35 bg-purple-950/40 text-purple-300 hover:bg-purple-900/40 hover:border-purple-400 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-[0_0_12px_rgba(168,85,247,0.1)] flex items-center justify-center gap-1.5"
-                onClick={exportPromptPack}
-              >
-                <FolderDown size={13} /> Export Pack
-              </button>
-            </div>
-          </div>
-
-          <div style={{ ...styles.card, marginBottom: 14 }}>
-            <div className="text-xs font-bold text-slate-200 mb-2 uppercase tracking-wide">
-              Negative Constraints
-            </div>
-            <div className="text-[11px] text-slate-400 leading-relaxed font-medium">
-              {promptPack.negativePrompt}
-            </div>
-          </div>
-
-          <div style={styles.card}>
-            <div className="text-xs font-bold text-slate-200 mb-2 uppercase tracking-wide">
-              Hosted Workflow
-            </div>
-            <pre className="m-0 whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-slate-400 font-medium">
-              {promptPack.workflowNotes}
-            </pre>
+            </p>
           </div>
         </div>
       </div>
