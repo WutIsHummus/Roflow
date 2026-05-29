@@ -10,6 +10,7 @@ const api = {
   openExternalUrl: (url) => ipcRenderer.invoke('shell:openExternalUrl', url),
   copyFile: (opts) => ipcRenderer.invoke('fs:copyFile', opts),
   copyText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
+  copyImageFromDataURL: (dataUrl) => ipcRenderer.invoke('clipboard:writeImageFromDataURL', dataUrl),
 
   // Animation pipeline
   textToMotion: (opts) => ipcRenderer.invoke('animation:textToMotion', opts),

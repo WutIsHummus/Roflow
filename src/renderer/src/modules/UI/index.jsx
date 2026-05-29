@@ -3,14 +3,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Settings,
   Sparkles,
-  Plus,
   Trash2,
   Image as ImageIcon,
-  RotateCcw,
   Copy,
-  FolderDown,
   Sparkle,
-  Compass
+  Compass,
+  Upload,
+  X,
+  ChevronRight,
+  ChevronDown,
+  LayoutTemplate
 } from 'lucide-react'
 
 let nextInstanceId = 1
@@ -76,6 +78,121 @@ function getParentOptions(allInstances, instanceId) {
   return allInstances.filter(
     (i) => i.id !== instanceId && RBX_CLASSES[i.rbxClass]?.canHaveChildren && i.rbxClass !== 'ScreenGui'
   )
+}
+
+function getDescendantIds(instances, instanceId) {
+  const ids = new Set()
+  function walk(id) {
+    for (const child of instances.filter((i) => i.parentId === id)) {
+      ids.add(child.id)
+      walk(child.id)
+    }
+  }
+  walk(instanceId)
+  return ids
+}
+
+function isValidParent(allInstances, instanceId, candidateParentId) {
+  if (!candidateParentId) return true
+  if (candidateParentId === instanceId) return false
+  if (getDescendantIds(allInstances, instanceId).has(candidateParentId)) return false
+  return getParentOptions(allInstances, instanceId).some((p) => p.id === candidateParentId)
+}
+
+function getAbsoluteBounds(inst, instances) {
+  let x = inst.x
+  let y = inst.y
+  let width = inst.width
+  let height = inst.height
+  let current = inst
+  while (current.parentId) {
+    const parent = instances.find((i) => i.id === current.parentId)
+    if (!parent) break
+    x = parent.x + (x / 100) * parent.width
+    y = parent.y + (y / 100) * parent.height
+    width = (width / 100) * parent.width
+    height = (height / 100) * parent.height
+    current = parent
+  }
+  return { x, y, width, height }
+}
+
+function absoluteToParentRelative(absX, absY, absW, absH, parentInst, instances) {
+  const parentAbs = getAbsoluteBounds(parentInst, instances)
+  return {
+    x: Math.max(0, Math.min(95, ((absX - parentAbs.x) / parentAbs.width) * 100)),
+    y: Math.max(0, Math.min(95, ((absY - parentAbs.y) / parentAbs.height) * 100)),
+    width: Math.max(4, Math.min(100, (absW / parentAbs.width) * 100)),
+    height: Math.max(4, Math.min(100, (absH / parentAbs.height) * 100))
+  }
+}
+
+function findDeepestContainerAt(instances, absX, absY, excludeId = null) {
+  const containers = instances.filter(
+    (i) =>
+      i.id !== excludeId &&
+      RBX_CLASSES[i.rbxClass]?.canHaveChildren &&
+      CANVAS_VISUAL_CLASSES.has(i.rbxClass)
+  )
+  let best = null
+  let bestArea = Infinity
+  for (const c of containers) {
+    const b = getAbsoluteBounds(c, instances)
+    if (absX >= b.x && absX <= b.x + b.width && absY >= b.y && absY <= b.y + b.height) {
+      const area = b.width * b.height
+      if (area < bestArea) {
+        bestArea = area
+        best = c
+      }
+    }
+  }
+  return best
+}
+
+function pctToScale(pct) {
+  return Math.round((pct / 100) * 10000) / 10000
+}
+
+function scaleToPct(scale) {
+  return scale * 100
+}
+
+function formatUDim2Position(inst) {
+  return `UDim2.fromScale(${pctToScale(inst.x)}, ${pctToScale(inst.y)})`
+}
+
+function formatUDim2Size(inst) {
+  return `UDim2.fromScale(${pctToScale(inst.width)}, ${pctToScale(inst.height)})`
+}
+
+function getLocalDeltaFromScreenDelta(dxPx, dyPx, inst, instances, canvasRect) {
+  const screenDxPct = (dxPx / canvasRect.width) * 100
+  const screenDyPct = (dyPx / canvasRect.height) * 100
+  if (!inst?.parentId) {
+    return { dxPct: screenDxPct, dyPct: screenDyPct }
+  }
+  const parent = instances.find((i) => i.id === inst.parentId)
+  if (!parent) return { dxPct: screenDxPct, dyPct: screenDyPct }
+  const parentAbs = getAbsoluteBounds(parent, instances)
+  return {
+    dxPct: parentAbs.width > 0 ? (screenDxPct / parentAbs.width) * 100 : screenDxPct,
+    dyPct: parentAbs.height > 0 ? (screenDyPct / parentAbs.height) * 100 : screenDyPct
+  }
+}
+
+function getLocalSizeDeltaFromScreenDelta(dxPx, dyPx, inst, instances, canvasRect) {
+  const screenDxPct = (dxPx / canvasRect.width) * 100
+  const screenDyPct = (dyPx / canvasRect.height) * 100
+  if (!inst?.parentId) {
+    return { dwPct: screenDxPct, dhPct: screenDyPct }
+  }
+  const parent = instances.find((i) => i.id === inst.parentId)
+  if (!parent) return { dwPct: screenDxPct, dhPct: screenDyPct }
+  const parentAbs = getAbsoluteBounds(parent, instances)
+  return {
+    dwPct: parentAbs.width > 0 ? (screenDxPct / parentAbs.width) * 100 : screenDxPct,
+    dhPct: parentAbs.height > 0 ? (screenDyPct / parentAbs.height) * 100 : screenDyPct
+  }
 }
 
 // Default props per class
@@ -168,13 +285,20 @@ function createInstance(rbxClass, overrides = {}) {
     width: isVisual ? 30 : 0,
     height: isVisual ? 20 : 0,
     properties: defaultProps(rbxClass),
+    imageDataUrl: null,
+    imagePath: null,
     notes: '',
     ...overrides
   }
 }
 
 function normalizeInstance(inst = {}) {
-  return createInstance(inst.rbxClass || 'Frame', inst)
+  const base = createInstance(inst.rbxClass || 'Frame', inst)
+  return {
+    ...base,
+    imageDataUrl: inst.imageDataUrl || null,
+    imagePath: inst.imagePath || null
+  }
 }
 
 const DEFAULT_WORKFLOW = {
@@ -259,8 +383,8 @@ function buildUIPrompt(workflow) {
     const props = Object.entries(inst.properties || {})
       .map(([k, v]) => `    ${k}: ${v}`)
       .join('\n')
-    const pos = `position: UDim2.new(${(inst.x / 100).toFixed(2)},0,${(inst.y / 100).toFixed(2)},0)`
-    const size = `size: UDim2.new(${(inst.width / 100).toFixed(2)},0,${(inst.height / 100).toFixed(2)},0)`
+    const pos = `Position = ${formatUDim2Position(inst)}`
+    const size = `Size = ${formatUDim2Size(inst)}`
     const parent = inst.parentId
       ? `parent: ${instances.find((i) => i.id === inst.parentId)?.name || inst.parentId}`
       : 'parent: ScreenGui'
@@ -293,7 +417,7 @@ function buildUIPrompt(workflow) {
   return { prompt: parts, hasContent: instances.length > 0 }
 }
 
-function buildImagePrompt(workflow, inst) {
+function buildImagePrompt(workflow, inst, referenceDataUrl = null) {
   const meta = RBX_CLASSES[inst.rbxClass]
   const lines = [
     `Generate an image asset for a Roblox ${inst.rbxClass} named "${inst.name}".`,
@@ -302,8 +426,11 @@ function buildImagePrompt(workflow, inst) {
     workflow.visualDirection ? `Visual direction: ${workflow.visualDirection}` : '',
     inst.notes ? `Design notes: ${inst.notes}` : '',
     inst.properties?.Text ? `Label text: ${inst.properties.Text}` : '',
-    `Size context: ${inst.width.toFixed(0)}% × ${inst.height.toFixed(0)}% of screen`,
+    `Size = ${formatUDim2Size(inst)} (relative to ${inst.parentId ? 'parent' : 'screen'})`,
     '',
+    referenceDataUrl
+      ? 'A reference image is attached — match its style, palette, composition, and level of detail.'
+      : '',
     `Render as a flat 2D game UI asset — no 3D, no shadows, no backgrounds unless explicitly described.`,
     `Output: transparent PNG, game-ready, clean edges, Roblox ${meta?.label || inst.rbxClass} style.`
   ].filter(Boolean).join('\n')
@@ -478,7 +605,7 @@ export default function UIModule({ workflowState, setWorkflowState, onChangeModu
   const [providerWebConfig, setProviderWebConfig] = useState(DEFAULT_PROVIDER_WEB_CONFIG)
   const [providerWebConfigLoaded, setProviderWebConfigLoaded] = useState(() => !window.api?.configGet)
   const [providerSessionState, setProviderSessionState] = useState(DEFAULT_PROVIDER_SESSION_STATE)
-  const [rightTab, setRightTab] = useState('props') // 'props' | 'prompt'
+  const [generatePanel, setGeneratePanel] = useState(null) // null | { mode: 'layout' } | { mode: 'image', instanceId }
 
   useEffect(() => {
     if (!setWorkflowState) return
@@ -507,7 +634,6 @@ export default function UIModule({ workflowState, setWorkflowState, onChangeModu
     [uiWorkflow.activeInstanceId, uiWorkflow.instances]
   )
   const promptState = useMemo(() => buildUIPrompt(uiWorkflow), [uiWorkflow])
-  const selectedProvider = PROVIDERS[uiWorkflow.provider] || PROVIDERS.manus
 
   const updateWorkflow = useCallback((changes) => setUiWorkflow((p) => ({ ...p, ...changes })), [])
 
@@ -542,6 +668,33 @@ export default function UIModule({ workflowState, setWorkflowState, onChangeModu
     })
   }, [])
 
+  const reparentInstance = useCallback((instanceId, newParentId) => {
+    setUiWorkflow((p) => {
+      if (!isValidParent(p.instances, instanceId, newParentId)) return p
+      const inst = p.instances.find((i) => i.id === instanceId)
+      if (!inst) return p
+      if (!newParentId) {
+        const abs = getAbsoluteBounds(inst, p.instances)
+        return {
+          ...p,
+          instances: p.instances.map((i) =>
+            i.id === instanceId ? { ...i, parentId: null, x: abs.x, y: abs.y, width: abs.width, height: abs.height } : i
+          )
+        }
+      }
+      const parent = p.instances.find((i) => i.id === newParentId)
+      if (!parent) return p
+      const abs = getAbsoluteBounds(inst, p.instances)
+      const rel = absoluteToParentRelative(abs.x, abs.y, abs.width, abs.height, parent, p.instances)
+      return {
+        ...p,
+        instances: p.instances.map((i) =>
+          i.id === instanceId ? { ...i, parentId: newParentId, ...rel } : i
+        )
+      }
+    })
+  }, [])
+
   const getProviderWebOptions = useCallback((pid) => {
     if (pid === 'manus') return { loginUrl: providerWebConfig.manusLoginUrl, workspaceUrl: providerWebConfig.manusWorkspaceUrl }
     return { loginUrl: providerWebConfig.chatgptLoginUrl, workspaceUrl: providerWebConfig.chatgptWorkspaceUrl }
@@ -561,14 +714,28 @@ export default function UIModule({ workflowState, setWorkflowState, onChangeModu
 
   useEffect(() => {
     if (!providerWebConfigLoaded) return
-    const t = window.setTimeout(() => { refreshProviderStatus('manus'); refreshProviderStatus('chatgpt-image') }, 0)
-    return () => window.clearTimeout(t)
+    let cancelled = false
+    const t = window.setTimeout(async () => {
+      await refreshProviderStatus('manus')
+      if (!cancelled) await refreshProviderStatus('chatgpt-image')
+    }, 0)
+    return () => { cancelled = true; window.clearTimeout(t) }
   }, [providerWebConfigLoaded, refreshProviderStatus])
 
   const openProviderWorkspace = useCallback(async (pid) => {
     const options = getProviderWebOptions(pid)
     const result = pid === 'manus' ? await window.api.manusWebOpenWorkspace(options) : await window.api.chatgptWebOpenWorkspace(options)
     if (!result?.success) { setNotice(result?.error || 'Could not open workspace.'); return false }
+    return true
+  }, [getProviderWebOptions])
+
+  const connectProvider = useCallback(async (pid) => {
+    const options = getProviderWebOptions(pid)
+    const result = pid === 'manus'
+      ? await window.api.manusWebOpenLogin(options)
+      : await window.api.chatgptWebOpenLogin(options)
+    if (!result?.success) { setNotice(result?.error || 'Could not open login.'); return false }
+    setNotice(pid === 'manus' ? 'Opened Manus login.' : 'Opened ChatGPT login.')
     return true
   }, [getProviderWebOptions])
 
@@ -588,82 +755,114 @@ export default function UIModule({ workflowState, setWorkflowState, onChangeModu
     setBusy('')
     if (!opened) return
     setNotice('Prompt copied and workspace opened.')
+    setGeneratePanel(null)
   }, [copyPrompt, openProviderWorkspace, promptState, uiWorkflow.provider])
 
-  const generateImageFor = useCallback(async (inst) => {
-    const text = buildImagePrompt(uiWorkflow, inst)
+  const generateImageFor = useCallback(async (inst, referenceDataUrl = null) => {
+    const ref = referenceDataUrl || inst.imageDataUrl || null
+    const text = buildImagePrompt(uiWorkflow, inst, ref)
     setBusy(`img-${inst.id}`)
     const copied = await copyPrompt(text)
     if (!copied) { setBusy(''); return }
+    if (ref && window.api?.copyImageFromDataURL) {
+      const imgResult = await window.api.copyImageFromDataURL(ref)
+      if (!imgResult?.success) {
+        setNotice(imgResult?.error || 'Could not copy reference image.')
+        setBusy('')
+        return
+      }
+    }
     const opened = await openProviderWorkspace(uiWorkflow.provider)
     setBusy('')
     if (!opened) return
-    setNotice(`Image prompt for ${inst.name} copied — workspace opened.`)
+    setNotice(
+      ref
+        ? `Prompt and reference image copied for ${inst.name} — paste both in your provider.`
+        : `Image prompt for ${inst.name} copied — workspace opened.`
+    )
+    setGeneratePanel(null)
   }, [copyPrompt, openProviderWorkspace, uiWorkflow])
+
+  const uploadImageForInstance = useCallback(async (instId) => {
+    if (!window.api?.openImage) return
+    setBusy(`upload-${instId}`)
+    try {
+      const filePath = await window.api.openImage()
+      if (!filePath) return
+      const result = await window.api.readFileAsDataURL({ filePath })
+      if (!result?.success) {
+        setNotice(result?.error || 'Could not read image.')
+        return
+      }
+      updateInstance(instId, { imageDataUrl: result.dataUrl, imagePath: filePath })
+      setNotice('Image uploaded.')
+    } finally {
+      setBusy('')
+    }
+  }, [updateInstance])
+
+  const clearInstanceImage = useCallback((instId) => {
+    updateInstance(instId, { imageDataUrl: null, imagePath: null })
+    updateInstanceProp(instId, 'Image', '')
+    setNotice('Image cleared.')
+  }, [updateInstance, updateInstanceProp])
 
   return (
     <div style={S.page}>
       {/* ── Header ── */}
       <div style={S.header}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+        <div className="flex justify-between items-start gap-4 mb-4">
           <div>
-            <h1 style={S.title} className="flex items-center gap-2">
-              <Compass size={18} className="text-rose-400" /> UI Studio
+            <h1 className="text-xl font-extrabold tracking-tight text-slate-100 flex items-center gap-2">
+              <Compass size={20} className="text-rose-400" /> UI Studio
             </h1>
-            <p style={{ fontSize: 11, color: '#94a3b8', margin: 0, marginTop: 4, fontWeight: 500 }}>
-              Place Roblox UI instances on the canvas, then generate.
+            <p className="text-xs text-slate-400 mt-1 font-medium">
+              Design Roblox UI layouts, upload or generate assets, and parent instances like Studio.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="flex gap-2 flex-wrap">
             <button
-              style={S.btn}
+              className="px-4 py-2 text-xs font-bold rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.1] hover:text-slate-100 hover:border-white/[0.15] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
               onClick={() => onChangeModule?.('settings')}
             >
               <Settings size={13} /> Settings
             </button>
-            {Object.entries(PROVIDERS).map(([id, prov]) => {
-              const active = uiWorkflow.provider === id
-              const status = providerSessionState[id]
-              
-              let activeBorder = '1px solid rgba(255,255,255,0.08)'
-              let activeColor = '#94a3b8'
-              let activeBg = 'rgba(255,255,255,0.04)'
-              if (active) {
-                if (id === 'manus') {
-                  activeBorder = '1px solid rgba(56,189,248,0.4)'
-                  activeColor = '#38bdf8'
-                  activeBg = 'rgba(56,189,248,0.1)'
-                } else if (id === 'chatgpt-image') {
-                  activeBorder = '1px solid rgba(52,211,153,0.4)'
-                  activeColor = '#34d399'
-                  activeBg = 'rgba(52,211,153,0.1)'
-                }
-              }
-
-              return (
-                <button 
-                  key={id} 
-                  onClick={() => updateWorkflow({ provider: id })} 
-                  style={{ ...S.btn, border: activeBorder, color: activeColor, background: activeBg, position: 'relative' }}
-                >
-                  {id === 'manus' && <Compass size={13} className={active ? 'text-sky-400' : 'text-slate-500'} />}
-                  {id === 'chatgpt-image' && <Sparkle size={13} className={active ? 'text-emerald-400' : 'text-slate-500'} />}
-                  {prov.label}
-                  {status?.connected && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80', position: 'absolute', top: 4, right: 4 }} />}
-                </button>
-              )
-            })}
-            <button style={S.primaryBtn} onClick={generate} disabled={busy === 'gen'}>
-              <Sparkles size={13} /> {busy === 'gen' ? 'Opening…' : selectedProvider.generateLabel}
+            <button
+              className="px-4 py-2 text-xs font-bold rounded-lg bg-white text-slate-950 hover:bg-white/90 shadow-sm transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+              onClick={() => setGeneratePanel({ mode: 'layout' })}
+            >
+              <Sparkles size={13} /> Generate
             </button>
           </div>
         </div>
+
         {notice && (
-          <div style={{ marginBottom: 10, padding: '10px 14px', borderRadius: 8, background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.18)', color: '#c4b5fd', fontSize: 11 }} className="flex items-center gap-1.5 animate-fadeIn">
-            <Sparkles size={13} /> <span>{notice}</span>
+          <div className="mb-3.5 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-medium animate-fadeIn flex items-center gap-1.5">
+            <Sparkles size={13} className="text-purple-300" /> <span>{notice}</span>
           </div>
         )}
       </div>
+
+      {generatePanel && (
+        <GeneratePanel
+          mode={generatePanel.mode}
+          targetInstance={generatePanel.instanceId ? uiWorkflow.instances.find((i) => i.id === generatePanel.instanceId) : null}
+          workflow={uiWorkflow}
+          promptState={promptState}
+          providers={PROVIDERS}
+          providerSessionState={providerSessionState}
+          busy={busy}
+          onClose={() => setGeneratePanel(null)}
+          onSelectProvider={(id) => updateWorkflow({ provider: id })}
+          onConnect={connectProvider}
+          onRefresh={refreshProviderStatus}
+          onOpenWorkspace={openProviderWorkspace}
+          onGenerateLayout={generate}
+          onGenerateImage={generateImageFor}
+          onCopyPrompt={copyPrompt}
+          styles={S}
+        />
+      )}
 
       {/* ── Body ── */}
       <div style={S.body}>
@@ -675,6 +874,7 @@ export default function UIModule({ workflowState, setWorkflowState, onChangeModu
             activeId={uiWorkflow.activeInstanceId}
             onSelect={(id) => updateWorkflow({ activeInstanceId: id })}
             onRemove={removeInstance}
+            onReparent={reparentInstance}
           />
         </div>
 
@@ -685,63 +885,33 @@ export default function UIModule({ workflowState, setWorkflowState, onChangeModu
             activeId={uiWorkflow.activeInstanceId}
             onSelect={(id) => updateWorkflow({ activeInstanceId: id })}
             onUpdate={updateInstance}
-            onCreate={(rbxClass, x, y, w, h) => {
-              const inst = createInstance(rbxClass, { x, y, width: w, height: h })
+            onCreate={(rbxClass, x, y, w, h, parentId = null) => {
+              const inst = createInstance(rbxClass, { x, y, width: w, height: h, parentId })
               setUiWorkflow((p) => ({ ...p, instances: [...p.instances, inst], activeInstanceId: inst.id }))
             }}
             onDeselect={() => updateWorkflow({ activeInstanceId: null })}
           />
         </div>
 
-        {/* Right panel: props / prompt */}
+        {/* Right panel: properties + project brief */}
         <div style={S.side}>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-            {[['props','Properties'], ['prompt','Prompt']].map(([id, label]) => (
-              <button key={id} onClick={() => setRightTab(id)} style={{ ...S.btn, flex: 1, fontSize: 10, padding: '5px 6px', border: rightTab === id ? '1px solid #7c3aed' : '1px solid #2a3040', color: rightTab === id ? '#c4b5fd' : '#c4cad8' }}>{label}</button>
-            ))}
-          </div>
-
-          {rightTab === 'props' && (
-            <PropertiesPanel
-              instance={activeInstance}
-              allInstances={uiWorkflow.instances}
-              onUpdate={updateInstance}
-              onUpdateProp={updateInstanceProp}
-              onGenerateImage={generateImageFor}
-              busy={busy}
-              styles={S}
-              workflow={uiWorkflow}
-              onUpdateWorkflow={updateWorkflow}
-            />
-          )}
-
-          {rightTab === 'prompt' && (
-            <div>
-              <div style={S.card}>
-                <label style={S.label}>Project</label>
-                <input style={S.input} value={uiWorkflow.projectName} onChange={(e) => updateWorkflow({ projectName: e.target.value })} placeholder="Project name" />
-              </div>
-              <div style={S.card}>
-                <label style={S.label}>Platform</label>
-                <select style={S.select} value={uiWorkflow.targetPlatform} onChange={(e) => updateWorkflow({ targetPlatform: e.target.value })}>
-                  {PLATFORM_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-                </select>
-              </div>
-              <div style={S.card}>
-                <label style={S.label}>Visual Direction</label>
-                <textarea rows={3} style={S.textarea} value={uiWorkflow.visualDirection} onChange={(e) => updateWorkflow({ visualDirection: e.target.value })} placeholder="Dark fantasy, neon, minimal..." />
-              </div>
-              <div style={S.card}>
-                <label style={S.label}>Implementation Notes</label>
-                <textarea rows={2} style={S.textarea} value={uiWorkflow.implementationNotes} onChange={(e) => updateWorkflow({ implementationNotes: e.target.value })} placeholder="Any extra notes for the AI" />
-              </div>
-              <div style={{ ...S.card, marginTop: 4 }}>
-                <label style={S.label}>Generated Prompt</label>
-                <textarea readOnly rows={14} style={{ ...S.textarea, color: '#d5d9e5' }} value={promptState.prompt || 'Add instances to build a prompt.'} />
-                <button style={{ ...S.btn, width: '100%', marginTop: 8 }} onClick={() => copyPrompt(promptState.prompt)}>Copy Prompt</button>
-              </div>
-            </div>
-          )}
+          <PropertiesPanel
+            instance={activeInstance}
+            allInstances={uiWorkflow.instances}
+            onUpdate={updateInstance}
+            onUpdateProp={updateInstanceProp}
+            onOpenGeneratePanel={(instanceId) => setGeneratePanel({ mode: 'image', instanceId })}
+            onUploadImage={uploadImageForInstance}
+            onClearImage={clearInstanceImage}
+            onOpenLayoutGenerate={() => setGeneratePanel({ mode: 'layout' })}
+            onCopyPrompt={copyPrompt}
+            promptPreview={promptState.prompt}
+            busy={busy}
+            styles={S}
+            workflow={uiWorkflow}
+            onUpdateWorkflow={updateWorkflow}
+            onReparent={reparentInstance}
+          />
         </div>
       </div>
     </div>
@@ -786,37 +956,113 @@ function InstancePalette({ onAdd }) {
 
 // ─── Instance Tree ────────────────────────────────────────────────────────────
 
-function InstanceTree({ instances, activeId, onSelect, onRemove }) {
+function InstanceTree({ instances, activeId, onSelect, onRemove, onReparent }) {
+  const [collapsed, setCollapsed] = useState({})
+  const [dragOverId, setDragOverId] = useState(null)
   const roots = instances.filter((i) => !i.parentId)
+
+  function toggleCollapse(id) {
+    setCollapsed((p) => ({ ...p, [id]: !p[id] }))
+  }
+
+  function handleDrop(targetId, e) {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOverId(null)
+    const sourceId = e.dataTransfer.getData('text/ui-instance-id')
+    if (!sourceId || sourceId === targetId) return
+    if (targetId === 'root') {
+      onReparent(sourceId, null)
+    } else if (isValidParent(instances, sourceId, targetId)) {
+      onReparent(sourceId, targetId)
+    }
+  }
+
   function renderNode(inst, depth = 0) {
     const meta = RBX_CLASSES[inst.rbxClass] || RBX_CLASSES.Frame
     const children = instances.filter((i) => i.parentId === inst.id)
     const active = inst.id === activeId
+    const isCollapsed = collapsed[inst.id]
+    const canAcceptChildren = meta.canHaveChildren
+    const isDragOver = dragOverId === inst.id
+
     return (
       <div key={inst.id}>
         <div
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('text/ui-instance-id', inst.id)
+            e.dataTransfer.effectAllowed = 'move'
+          }}
+          onDragOver={(e) => {
+            if (!canAcceptChildren) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            setDragOverId(inst.id)
+          }}
+          onDragLeave={() => setDragOverId((p) => (p === inst.id ? null : p))}
+          onDrop={(e) => canAcceptChildren && handleDrop(inst.id, e)}
           onClick={() => onSelect(inst.id)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: `3px ${6 + depth * 12}px`, cursor: 'pointer', background: active ? 'rgba(124,58,237,0.15)' : 'transparent', borderLeft: active ? '2px solid #7c3aed' : '2px solid transparent', borderRadius: 4 }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: `3px ${6 + depth * 12}px`,
+            cursor: 'grab',
+            background: isDragOver ? 'rgba(96,165,250,0.15)' : active ? 'rgba(124,58,237,0.15)' : 'transparent',
+            borderLeft: active ? '2px solid #7c3aed' : isDragOver ? '2px solid #60a5fa' : '2px solid transparent',
+            borderRadius: 4
+          }}
         >
+          {children.length > 0 ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleCollapse(inst.id) }}
+              style={{ background: 'none', border: 'none', color: '#7c8499', cursor: 'pointer', padding: 0, display: 'flex' }}
+            >
+              {isCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+            </button>
+          ) : (
+            <span style={{ width: 11 }} />
+          )}
           <span style={{ fontSize: 11 }}>{meta.icon}</span>
           <span style={{ flex: 1, fontSize: 11, color: active ? '#c4b5fd' : '#c4cad8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inst.name}</span>
           <span style={{ fontSize: 9, color: '#555b6e' }}>{inst.rbxClass}{meta.beta ? ' β' : ''}</span>
           <button onClick={(e) => { e.stopPropagation(); onRemove(inst.id) }} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 10, padding: 0 }}>✕</button>
         </div>
-        {children.map((c) => renderNode(c, depth + 1))}
+        {!isCollapsed && children.map((c) => renderNode(c, depth + 1))}
       </div>
     )
   }
+
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', color: '#7c8499', fontSize: 11, borderBottom: '1px solid #1e2330', marginBottom: 4 }}>
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOverId('root') }}
+        onDragLeave={() => setDragOverId((p) => (p === 'root' ? null : p))}
+        onDrop={(e) => handleDrop('root', e)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '3px 6px',
+          color: dragOverId === 'root' ? '#93c5fd' : '#7c8499',
+          fontSize: 11,
+          borderBottom: '1px solid #1e2330',
+          marginBottom: 4,
+          background: dragOverId === 'root' ? 'rgba(96,165,250,0.1)' : 'transparent',
+          borderRadius: 4
+        }}
+      >
         <span>🖥️</span>
         <span style={{ flex: 1, fontWeight: 700 }}>{IMPLICIT_ROOT_LABEL}</span>
         <span style={{ fontSize: 9 }}>root</span>
       </div>
       {roots.length === 0
-        ? <div style={{ fontSize: 11, color: '#555b6e', padding: '8px 10px' }}>No instances yet — insert from palette</div>
+        ? <div style={{ fontSize: 11, color: '#555b6e', padding: '8px 10px' }}>No instances yet — insert from palette or draw on canvas</div>
         : roots.map((i) => renderNode(i))}
+      <div style={{ fontSize: 9, color: '#555b6e', padding: '8px 10px', lineHeight: 1.5 }}>
+        Drag instances onto containers to reparent, like Roblox Explorer.
+      </div>
     </div>
   )
 }
@@ -895,7 +1141,19 @@ function UICanvas({ instances, activeId, onSelect, onUpdate, onCreate, onDeselec
         const handle = handleEl.dataset.handle
         const inst = instancesRef.current.find((i) => i.id === instId)
         if (!inst) return
-        dragRef.current = { type: 'resize', instId, handle, startMx: e.clientX, startMy: e.clientY, startX: inst.x, startY: inst.y, startW: inst.width, startH: inst.height }
+        dragRef.current = {
+          type: 'resize',
+          instId,
+          handle,
+          dragEl: handleEl.closest('[data-inst-id]'),
+          startMx: e.clientX,
+          startMy: e.clientY,
+          startX: inst.x,
+          startY: inst.y,
+          startW: inst.width,
+          startH: inst.height,
+          pending: null
+        }
         onSelectRef.current(instId)
         e.stopPropagation()
         e.preventDefault()
@@ -903,9 +1161,21 @@ function UICanvas({ instances, activeId, onSelect, onUpdate, onCreate, onDeselec
         const instId = instEl.dataset.instId
         const inst = instancesRef.current.find((i) => i.id === instId)
         if (!inst) return
-        dragRef.current = { type: 'move', instId, startMx: e.clientX, startMy: e.clientY, startX: inst.x, startY: inst.y, startW: inst.width, startH: inst.height }
+        dragRef.current = {
+          type: 'move',
+          instId,
+          dragEl: instEl,
+          startMx: e.clientX,
+          startMy: e.clientY,
+          startX: inst.x,
+          startY: inst.y,
+          startW: inst.width,
+          startH: inst.height,
+          pending: null
+        }
         onSelectRef.current(instId)
         e.preventDefault()
+        e.stopPropagation()
       } else {
         onDeselectRef.current()
         const cr = canvasEl.getBoundingClientRect()
@@ -917,36 +1187,75 @@ function UICanvas({ instances, activeId, onSelect, onUpdate, onCreate, onDeselec
       }
     }
 
+    function applyDragVisual(el, x, y, w, h) {
+      if (!el) return
+      el.style.left = `${x}%`
+      el.style.top = `${y}%`
+      el.style.width = `${w}%`
+      el.style.height = `${h}%`
+    }
+
     function onMouseMove(e) {
       const d = dragRef.current
       if (!d) return
       const rect = getRect()
       const dx = e.clientX - d.startMx
       const dy = e.clientY - d.startMy
-      const dxPct = (dx / rect.width) * 100
-      const dyPct = (dy / rect.height) * 100
+      const inst = instancesRef.current.find((i) => i.id === d.instId)
 
-      if (d.type === 'move') {
-        onUpdateRef.current(d.instId, { x: Math.max(0, Math.min(90, d.startX + dxPct)), y: Math.max(0, Math.min(90, d.startY + dyPct)) })
-      } else if (d.type === 'resize') {
+      if (d.type === 'move' && inst) {
+        const { dxPct, dyPct } = getLocalDeltaFromScreenDelta(dx, dy, inst, instancesRef.current, rect)
+        const x = Math.max(0, Math.min(95, d.startX + dxPct))
+        const y = Math.max(0, Math.min(95, d.startY + dyPct))
+        applyDragVisual(d.dragEl, x, y, d.startW, d.startH)
+        d.pending = { x, y }
+      } else if (d.type === 'resize' && inst) {
+        const { dxPct, dyPct } = getLocalDeltaFromScreenDelta(dx, dy, inst, instancesRef.current, rect)
+        const { dwPct, dhPct } = getLocalSizeDeltaFromScreenDelta(dx, dy, inst, instancesRef.current, rect)
         const h = d.handle
         let x = d.startX, y = d.startY, w = d.startW, ht = d.startH
-        if (h === 'se') { w = Math.max(4, d.startW + dxPct); ht = Math.max(4, d.startH + dyPct) }
-        else if (h === 'sw') { x = d.startX + dxPct; w = Math.max(4, d.startW - dxPct); ht = Math.max(4, d.startH + dyPct) }
-        else if (h === 'ne') { y = d.startY + dyPct; w = Math.max(4, d.startW + dxPct); ht = Math.max(4, d.startH - dyPct) }
-        else if (h === 'nw') { x = d.startX + dxPct; y = d.startY + dyPct; w = Math.max(4, d.startW - dxPct); ht = Math.max(4, d.startH - dyPct) }
-        else if (h === 'n') { y = d.startY + dyPct; ht = Math.max(4, d.startH - dyPct) }
-        else if (h === 's') { ht = Math.max(4, d.startH + dyPct) }
-        else if (h === 'e') { w = Math.max(4, d.startW + dxPct) }
-        else if (h === 'w') { x = d.startX + dxPct; w = Math.max(4, d.startW - dxPct) }
-        onUpdateRef.current(d.instId, { x: Math.max(0, x), y: Math.max(0, y), width: Math.min(100, w), height: Math.min(100, ht) })
+        if (h === 'se') { w = Math.max(4, d.startW + dwPct); ht = Math.max(4, d.startH + dhPct) }
+        else if (h === 'sw') { x = d.startX + dxPct; w = Math.max(4, d.startW - dwPct); ht = Math.max(4, d.startH + dhPct) }
+        else if (h === 'ne') { y = d.startY + dyPct; w = Math.max(4, d.startW + dwPct); ht = Math.max(4, d.startH - dhPct) }
+        else if (h === 'nw') { x = d.startX + dxPct; y = d.startY + dyPct; w = Math.max(4, d.startW - dwPct); ht = Math.max(4, d.startH - dhPct) }
+        else if (h === 'n') { y = d.startY + dyPct; ht = Math.max(4, d.startH - dhPct) }
+        else if (h === 's') { ht = Math.max(4, d.startH + dhPct) }
+        else if (h === 'e') { w = Math.max(4, d.startW + dwPct) }
+        else if (h === 'w') { x = d.startX + dxPct; w = Math.max(4, d.startW - dwPct) }
+        x = Math.max(0, x)
+        y = Math.max(0, y)
+        w = Math.min(100, w)
+        ht = Math.min(100, ht)
+        applyDragVisual(d.dragEl, x, y, w, ht)
+        d.pending = { x, y, width: w, height: ht }
       } else if (d.type === 'create') {
+        const dxPct = (dx / rect.width) * 100
+        const dyPct = (dy / rect.height) * 100
         dragRef.current = { ...d, startW: Math.abs(dxPct), startH: Math.abs(dyPct) }
       }
     }
 
     function onMouseUp(e) {
       const d = dragRef.current
+      if (d && (d.type === 'move' || d.type === 'resize') && d.pending) {
+        onUpdateRef.current(d.instId, d.pending)
+      }
+      if (d && d.type === 'move') {
+        const inst = instancesRef.current.find((i) => i.id === d.instId)
+        if (inst) {
+          const merged = { ...inst, ...d.pending }
+          const abs = getAbsoluteBounds(merged, instancesRef.current)
+          const centerX = abs.x + abs.width / 2
+          const centerY = abs.y + abs.height / 2
+          const container = findDeepestContainerAt(instancesRef.current, centerX, centerY, inst.id)
+          if (container && container.id !== inst.parentId) {
+            const rel = absoluteToParentRelative(abs.x, abs.y, abs.width, abs.height, container, instancesRef.current)
+            onUpdateRef.current(inst.id, { parentId: container.id, ...rel })
+          } else if (!container && inst.parentId) {
+            onUpdateRef.current(inst.id, { parentId: null, x: abs.x, y: abs.y, width: abs.width, height: abs.height })
+          }
+        }
+      }
       if (d && d.type === 'create' && (d.startW > 3 || d.startH > 3)) {
         const rect = getRect()
         const dx = e.clientX - d.startMx
@@ -955,7 +1264,17 @@ function UICanvas({ instances, activeId, onSelect, onUpdate, onCreate, onDeselec
         const dyPct = (dy / rect.height) * 100
         const x = dxPct < 0 ? d.startX + dxPct : d.startX
         const y = dyPct < 0 ? d.startY + dyPct : d.startY
-        onCreateRef.current(d.createClass, Math.max(0, x), Math.max(0, y), Math.max(4, Math.abs(dxPct)), Math.max(4, Math.abs(dyPct)))
+        const w = Math.max(4, Math.abs(dxPct))
+        const h = Math.max(4, Math.abs(dyPct))
+        const centerX = x + w / 2
+        const centerY = y + h / 2
+        const container = findDeepestContainerAt(instancesRef.current, centerX, centerY)
+        if (container) {
+          const rel = absoluteToParentRelative(x, y, w, h, container, instancesRef.current)
+          onCreateRef.current(d.createClass, rel.x, rel.y, rel.width, rel.height, container.id)
+        } else {
+          onCreateRef.current(d.createClass, Math.max(0, x), Math.max(0, y), w, h, null)
+        }
       }
       dragRef.current = null
     }
@@ -970,7 +1289,58 @@ function UICanvas({ instances, activeId, onSelect, onUpdate, onCreate, onDeselec
     }
   }, []) // stable — reads everything via refs
 
-  const visualInstances = instances.filter((i) => CANVAS_VISUAL_CLASSES.has(i.rbxClass))
+  const visualRoots = instances.filter((i) => !i.parentId && CANVAS_VISUAL_CLASSES.has(i.rbxClass))
+
+  function renderCanvasInstance(inst) {
+    const meta = RBX_CLASSES[inst.rbxClass] || RBX_CLASSES.Frame
+    const active = inst.id === activeId
+    const children = instances.filter((i) => i.parentId === inst.id && CANVAS_VISUAL_CLASSES.has(i.rbxClass))
+    const isContainer = meta.canHaveChildren
+    const hasImage = (inst.rbxClass === 'ImageLabel' || inst.rbxClass === 'ImageButton') && inst.imageDataUrl
+
+    const instStyle = {
+      position: 'absolute',
+      left: `${inst.x}%`,
+      top: `${inst.y}%`,
+      width: `${inst.width}%`,
+      height: `${inst.height}%`,
+      boxSizing: 'border-box',
+      border: active ? `2px solid ${meta.color === '#1e3a5f' ? '#60a5fa' : '#a78bfa'}` : `1px solid ${meta.color}88`,
+      background: hasImage ? 'transparent' : meta.color + (active ? '30' : '18'),
+      cursor: 'move',
+      userSelect: 'none',
+      display: 'flex',
+      alignItems: 'flex-start',
+      overflow: isContainer ? 'hidden' : 'hidden'
+    }
+
+    return (
+      <div key={inst.id} data-inst-id={inst.id} style={instStyle}>
+        {hasImage && (
+          <img
+            src={inst.imageDataUrl}
+            alt=""
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}
+          />
+        )}
+        <div style={{ fontSize: 9, fontWeight: 700, background: meta.color + 'cc', color: '#eef0f6', padding: '1px 5px', borderRadius: '0 0 4px 0', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none', position: 'relative', zIndex: 1 }}>
+          {meta.icon} {inst.name}
+        </div>
+        {(inst.rbxClass === 'TextLabel' || inst.rbxClass === 'TextButton' || inst.rbxClass === 'TextBox') && inst.properties?.Text && (
+          <div style={{ position: 'absolute', bottom: 2, left: 4, right: 4, fontSize: 10, color: '#eef0f6cc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 1 }}>
+            {inst.properties.Text}
+          </div>
+        )}
+        {(inst.rbxClass === 'ImageLabel' || inst.rbxClass === 'ImageButton') && !hasImage && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, opacity: 0.3, pointerEvents: 'none' }}>🖼</div>
+        )}
+        {children.map((child) => renderCanvasInstance(child))}
+        {active && RESIZE_HANDLES.map(({ h, style: hPos }) => (
+          <div key={h} data-inst-id={inst.id} data-handle={h} style={{ position: 'absolute', width: 8, height: 8, background: '#fff', border: '1px solid #7c3aed', borderRadius: 2, cursor: `${h}-resize`, zIndex: 10, ...hPos }} />
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div ref={containerRef} style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
@@ -1002,44 +1372,8 @@ function UICanvas({ instances, activeId, onSelect, onUpdate, onCreate, onDeselec
           <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#6b7280" strokeWidth="0.5" strokeDasharray="4,4" />
         </svg>
 
-        {/* Instances — no mouse event props; all handled by effect via data attributes */}
-        {visualInstances.map((inst) => {
-          const meta = RBX_CLASSES[inst.rbxClass] || RBX_CLASSES.Frame
-          const active = inst.id === activeId
-          const instStyle = {
-            position: 'absolute',
-            left: `${inst.x}%`,
-            top: `${inst.y}%`,
-            width: `${inst.width}%`,
-            height: `${inst.height}%`,
-            boxSizing: 'border-box',
-            border: active ? `2px solid ${meta.color === '#1e3a5f' ? '#60a5fa' : '#a78bfa'}` : `1px solid ${meta.color}88`,
-            background: meta.color + (active ? '30' : '18'),
-            cursor: 'move',
-            userSelect: 'none',
-            display: 'flex',
-            alignItems: 'flex-start',
-            overflow: 'hidden'
-          }
-          return (
-            <div key={inst.id} data-inst-id={inst.id} style={instStyle}>
-              <div style={{ fontSize: 9, fontWeight: 700, background: meta.color + 'cc', color: '#eef0f6', padding: '1px 5px', borderRadius: '0 0 4px 0', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
-                {meta.icon} {inst.name}
-              </div>
-              {(inst.rbxClass === 'TextLabel' || inst.rbxClass === 'TextButton' || inst.rbxClass === 'TextBox') && inst.properties?.Text && (
-                <div style={{ position: 'absolute', bottom: 2, left: 4, right: 4, fontSize: 10, color: '#eef0f6cc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
-                  {inst.properties.Text}
-                </div>
-              )}
-              {(inst.rbxClass === 'ImageLabel' || inst.rbxClass === 'ImageButton') && (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, opacity: 0.3, pointerEvents: 'none' }}>🖼</div>
-              )}
-              {active && RESIZE_HANDLES.map(({ h, style: hPos }) => (
-                <div key={h} data-inst-id={inst.id} data-handle={h} style={{ position: 'absolute', width: 8, height: 8, background: '#fff', border: '1px solid #7c3aed', borderRadius: 2, cursor: `${h}-resize`, zIndex: 10, ...hPos }} />
-              ))}
-            </div>
-          )
-        })}
+        {/* Instances — nested hierarchy like Roblox */}
+        {visualRoots.map((inst) => renderCanvasInstance(inst))}
 
         <div style={{ position: 'absolute', bottom: 4, right: 8, fontSize: 9, color: '#555b6e', pointerEvents: 'none' }}>
           1920 × 1080 (scaled)
@@ -1054,13 +1388,17 @@ function UICanvas({ instances, activeId, onSelect, onUpdate, onCreate, onDeselec
 const IMAGE_CLASSES = new Set(['ImageLabel', 'ImageButton'])
 const TEXT_CLASSES = new Set(['TextLabel', 'TextButton', 'TextBox'])
 
-function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGenerateImage, busy, styles: S, workflow, onUpdateWorkflow }) {
+function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onOpenGeneratePanel, onUploadImage, onClearImage, onOpenLayoutGenerate, onCopyPrompt, promptPreview, busy, styles: S, workflow, onUpdateWorkflow, onReparent }) {
   const screenGuiDefaults = workflow.screenGuiDefaults || DEFAULT_WORKFLOW.screenGuiDefaults
+  const [showPromptPreview, setShowPromptPreview] = useState(false)
 
   if (!instance) {
     return (
       <div style={{ fontSize: 12, color: '#555b6e', lineHeight: 1.8 }}>
-        <div style={{ marginBottom: 10, fontSize: 13, fontWeight: 700, color: '#eef0f6' }}>Project</div>
+        <div style={{ marginBottom: 10, fontSize: 13, fontWeight: 700, color: '#eef0f6' }}>Project Brief</div>
+        <div style={{ fontSize: 11, color: '#7c8499', marginBottom: 12, lineHeight: 1.5 }}>
+          These settings feed into Generate when creating full UI layouts or image assets. There is no separate prompt tab — use Generate to copy the layout prompt.
+        </div>
         <div style={S.card}>
           <label style={S.label}>Project name</label>
           <input style={S.input} value={workflow.projectName} onChange={(e) => onUpdateWorkflow({ projectName: e.target.value })} placeholder="Project name" />
@@ -1070,6 +1408,14 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
           <select style={S.select} value={workflow.targetPlatform} onChange={(e) => onUpdateWorkflow({ targetPlatform: e.target.value })}>
             {PLATFORM_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
+        </div>
+        <div style={S.card}>
+          <label style={S.label}>Visual direction</label>
+          <textarea rows={3} style={S.textarea} value={workflow.visualDirection} onChange={(e) => onUpdateWorkflow({ visualDirection: e.target.value })} placeholder="Dark fantasy, neon, minimal..." />
+        </div>
+        <div style={S.card}>
+          <label style={S.label}>Implementation notes</label>
+          <textarea rows={2} style={S.textarea} value={workflow.implementationNotes} onChange={(e) => onUpdateWorkflow({ implementationNotes: e.target.value })} placeholder="Extra notes for the AI" />
         </div>
         <div style={S.card}>
           <label style={S.label}>{IMPLICIT_ROOT_LABEL} (implicit root)</label>
@@ -1095,8 +1441,16 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
             </div>
           </div>
         </div>
+        <button style={{ ...S.primaryBtn, width: '100%', marginBottom: 12 }} onClick={onOpenLayoutGenerate}>
+          <Sparkles size={13} /> Generate Layout
+        </button>
+        <details open={showPromptPreview} onToggle={(e) => setShowPromptPreview(e.target.open)}>
+          <summary style={{ fontSize: 10, color: '#7c8499', cursor: 'pointer', fontWeight: 700, marginBottom: 8 }}>Layout prompt preview</summary>
+          <textarea readOnly rows={8} style={{ ...S.textarea, color: '#d5d9e5', fontSize: 10 }} value={promptPreview || 'Add instances to build a layout prompt.'} />
+          <button style={{ ...S.btn, width: '100%', marginTop: 8 }} onClick={() => onCopyPrompt(promptPreview)}>Copy Prompt</button>
+        </details>
         <div style={{ padding: '12px 4px', color: '#555b6e', fontSize: 11 }}>
-          Select an instance or click the canvas to add one.
+          Select an instance on the canvas to edit its properties.
         </div>
       </div>
     )
@@ -1127,10 +1481,21 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
 
       <div style={S.card}>
         <label style={S.label}>Parent</label>
-        <select style={S.select} value={instance.parentId || ''} onChange={(e) => onUpdate(instance.id, { parentId: e.target.value || null })}>
+        <select
+          style={S.select}
+          value={instance.parentId || ''}
+          onChange={(e) => {
+            const newParentId = e.target.value || null
+            if (onReparent) onReparent(instance.id, newParentId)
+            else onUpdate(instance.id, { parentId: newParentId })
+          }}
+        >
           <option value="">{IMPLICIT_ROOT_LABEL} (root)</option>
           {parents.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.rbxClass})</option>)}
         </select>
+        <div style={{ fontSize: 9, color: '#555b6e', marginTop: 6, lineHeight: 1.4 }}>
+          Or drag in the hierarchy tree to reparent like Roblox Explorer.
+        </div>
       </div>
 
       {(isGuiObject || isZIndexModifier) && (
@@ -1161,14 +1526,29 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
 
       {isVisual && (
         <div style={S.card}>
-          <label style={S.label}>Position &amp; Size (%)</label>
+          <label style={S.label}>Position &amp; Size (UDim2 scale)</label>
+          <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 8, lineHeight: 1.4 }}>
+            Relative to {instance.parentId ? 'parent' : 'ScreenGui'}. Offset is always 0 — scale only, like Roblox Studio.
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {[['x','X','%'],['y','Y','%'],['width','W','%'],['height','H','%']].map(([key, label]) => (
+            {[['x', 'X scale'], ['y', 'Y scale'], ['width', 'Width scale'], ['height', 'Height scale']].map(([key, label]) => (
               <div key={key}>
                 <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>{label}</div>
-                <input type="number" style={S.input} value={Number(instance[key]).toFixed(1)} onChange={(e) => onUpdate(instance.id, { [key]: Number(e.target.value) })} />
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  style={S.input}
+                  value={pctToScale(instance[key])}
+                  onChange={(e) => onUpdate(instance.id, { [key]: scaleToPct(Number(e.target.value)) })}
+                />
               </div>
             ))}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 9, color: '#64748b', fontFamily: 'monospace', lineHeight: 1.5 }}>
+            {formatUDim2Position(instance)}<br />
+            {formatUDim2Size(instance)}
           </div>
         </div>
       )}
@@ -1211,12 +1591,40 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
         </div>
       )}
 
-      {/* Image properties */}
+      {/* Image asset */}
       {isImage && (
         <div style={S.card}>
-          <label style={S.label}>Image</label>
-          <input style={S.input} value={instance.properties.Image || ''} onChange={(e) => onUpdateProp(instance.id, 'Image', e.target.value)} placeholder="rbxassetid://..." />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+          <label style={S.label}>Image Asset</label>
+          {instance.imageDataUrl ? (
+            <div style={{ marginBottom: 10, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.3)' }}>
+              <img src={instance.imageDataUrl} alt="" style={{ width: '100%', maxHeight: 120, objectFit: 'contain', display: 'block' }} />
+            </div>
+          ) : (
+            <div style={{ marginBottom: 10, padding: 20, borderRadius: 8, border: '1px dashed rgba(255,255,255,0.1)', textAlign: 'center', color: '#555b6e', fontSize: 11 }}>
+              No image yet — upload or generate
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+            <button
+              style={{ ...S.btn, flex: 1, minWidth: 90 }}
+              onClick={() => onUploadImage(instance.id)}
+              disabled={busy === `upload-${instance.id}`}
+            >
+              <Upload size={12} /> {busy === `upload-${instance.id}` ? 'Uploading…' : 'Upload PNG'}
+            </button>
+            <button
+              style={{ ...S.primaryBtn, flex: 1, minWidth: 90 }}
+              onClick={() => onOpenGeneratePanel(instance.id)}
+            >
+              <Sparkles size={12} /> Generate
+            </button>
+            {instance.imageDataUrl && (
+              <button style={{ ...S.btn, flex: '1 1 100%' }} onClick={() => onClearImage(instance.id)}>
+                Clear image
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div>
               <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>ScaleType</div>
               <select style={S.select} value={instance.properties.ScaleType || 'Stretch'} onChange={(e) => onUpdateProp(instance.id, 'ScaleType', e.target.value)}>
@@ -1228,13 +1636,13 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
               <input type="number" min={0} max={1} step={0.05} style={S.input} value={instance.properties.BackgroundTransparency ?? 1} onChange={(e) => onUpdateProp(instance.id, 'BackgroundTransparency', Number(e.target.value))} />
             </div>
           </div>
-          <button
-            style={{ ...S.primaryBtn, width: '100%', marginTop: 10 }}
-            onClick={() => onGenerateImage(instance)}
-            disabled={busy === `img-${instance.id}`}
-          >
-            {busy === `img-${instance.id}` ? 'Opening…' : '✨ Generate image for this'}
-          </button>
+          <details style={{ marginTop: 10 }}>
+            <summary style={{ fontSize: 10, color: '#7c8499', cursor: 'pointer', fontWeight: 700 }}>Roblox export (optional)</summary>
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 9, color: '#7c8499', marginBottom: 3 }}>rbxassetid after upload to Roblox</div>
+              <input style={S.input} value={instance.properties.Image || ''} onChange={(e) => onUpdateProp(instance.id, 'Image', e.target.value)} placeholder="rbxassetid://…" />
+            </div>
+          </details>
         </div>
       )}
 
@@ -1411,6 +1819,202 @@ function PropertiesPanel({ instance, allInstances, onUpdate, onUpdateProp, onGen
       <div style={S.card}>
         <label style={S.label}>Design Notes</label>
         <textarea rows={3} style={S.textarea} value={instance.notes || ''} onChange={(e) => onUpdate(instance.id, { notes: e.target.value })} placeholder="Describe this element's look, behaviour, content..." />
+      </div>
+    </div>
+  )
+}
+
+// ─── Generate Panel (modal) ───────────────────────────────────────────────────
+
+function GeneratePanel({
+  mode,
+  targetInstance,
+  workflow,
+  promptState,
+  providers,
+  providerSessionState,
+  busy,
+  onClose,
+  onSelectProvider,
+  onConnect,
+  onRefresh,
+  onOpenWorkspace,
+  onGenerateLayout,
+  onGenerateImage,
+  onCopyPrompt,
+  styles: S
+}) {
+  const isLayout = mode === 'layout'
+  const isBusy = isLayout ? busy === 'gen' : targetInstance && busy === `img-${targetInstance.id}`
+  const [referenceDataUrl, setReferenceDataUrl] = useState(
+    () => (!isLayout && targetInstance?.imageDataUrl) || null
+  )
+  const imagePrompt = targetInstance ? buildImagePrompt(workflow, targetInstance, referenceDataUrl) : ''
+
+  async function uploadReference() {
+    if (!window.api?.openImage) return
+    const filePath = await window.api.openImage()
+    if (!filePath) return
+    const result = await window.api.readFileAsDataURL({ filePath })
+    if (result?.success) setReferenceDataUrl(result.dataUrl)
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 100,
+        background: 'rgba(0,0,0,0.65)',
+        backdropFilter: 'blur(6px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 520,
+          maxHeight: '85vh',
+          overflowY: 'auto',
+          background: 'rgba(16, 19, 28, 0.95)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 16,
+          padding: 20,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.5)'
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#eef0f6', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {isLayout ? <LayoutTemplate size={18} className="text-purple-400" /> : <ImageIcon size={18} className="text-purple-400" />}
+              {isLayout ? 'Generate UI Layout' : 'Generate Image Asset'}
+            </div>
+            <div style={{ fontSize: 11, color: '#7c8499', marginTop: 4 }}>
+              {isLayout
+                ? 'Copy a full layout prompt and open your AI workspace.'
+                : targetInstance
+                  ? `Create an image for ${targetInstance.name} (${targetInstance.rbxClass}).`
+                  : 'Select an ImageLabel or ImageButton first.'}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: '#7c8499', cursor: 'pointer', padding: 4 }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={S.card}>
+          <label style={S.label}>Provider</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {Object.entries(providers).map(([id, provider]) => {
+              const active = workflow.provider === id
+              const status = providerSessionState[id]
+              return (
+                <button
+                  key={id}
+                  onClick={() => onSelectProvider(id)}
+                  style={{
+                    flex: 1,
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: active ? `1px solid ${provider.accent}` : '1px solid rgba(255,255,255,0.08)',
+                    background: active ? `${provider.accent}18` : 'rgba(255,255,255,0.03)',
+                    color: '#eef0f6',
+                    cursor: 'pointer',
+                    textAlign: 'left'
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {id === 'manus' && <Compass size={12} style={{ color: provider.accent }} />}
+                    {id === 'chatgpt-image' && <Sparkle size={12} style={{ color: provider.accent }} />}
+                    {provider.label}
+                  </div>
+                  <div style={{ fontSize: 9, marginTop: 4, color: status?.connected ? '#4ade80' : '#64748b' }}>
+                    {status?.connected ? 'Connected' : 'Offline'}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+            <button style={{ ...S.btn, fontSize: 10, padding: '6px 10px' }} onClick={() => onConnect(workflow.provider)}>Connect</button>
+            <button style={{ ...S.btn, fontSize: 10, padding: '6px 10px' }} onClick={() => onOpenWorkspace(workflow.provider)}>Workspace</button>
+            <button style={{ ...S.btn, fontSize: 10, padding: '6px 10px' }} onClick={() => onRefresh(workflow.provider)}>Refresh</button>
+          </div>
+        </div>
+
+        {!isLayout && (
+          <div style={S.card}>
+            <label style={S.label}>Reference Image (optional)</label>
+            <div style={{ fontSize: 10, color: '#7c8499', marginBottom: 8, lineHeight: 1.4 }}>
+              Attach a style or composition reference. It will be copied to your clipboard when you generate so you can paste it into Manus or ChatGPT.
+            </div>
+            {referenceDataUrl ? (
+              <div style={{ marginBottom: 8, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <img src={referenceDataUrl} alt="" style={{ width: '100%', maxHeight: 140, objectFit: 'contain', display: 'block', background: 'rgba(0,0,0,0.3)' }} />
+              </div>
+            ) : null}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button style={{ ...S.btn, flex: 1 }} onClick={uploadReference}>
+                <Upload size={12} /> Upload reference
+              </button>
+              {targetInstance?.imageDataUrl && referenceDataUrl !== targetInstance.imageDataUrl && (
+                <button style={{ ...S.btn, flex: 1 }} onClick={() => setReferenceDataUrl(targetInstance.imageDataUrl)}>
+                  Use instance image
+                </button>
+              )}
+              {referenceDataUrl && (
+                <button style={{ ...S.btn, flex: '1 1 100%' }} onClick={() => setReferenceDataUrl(null)}>
+                  Remove reference
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div style={S.card}>
+          <label style={S.label}>Prompt Preview</label>
+          <textarea
+            readOnly
+            rows={isLayout ? 10 : 8}
+            style={{ ...S.textarea, fontSize: 10 }}
+            value={isLayout ? (promptState.prompt || 'Add instances to build a layout prompt.') : (imagePrompt || 'No target instance.')}
+          />
+          <button
+            style={{ ...S.btn, width: '100%', marginTop: 8 }}
+            onClick={() => onCopyPrompt(isLayout ? promptState.prompt : imagePrompt)}
+          >
+            <Copy size={12} /> Copy Prompt
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <button style={{ ...S.btn, flex: 1 }} onClick={onClose}>Cancel</button>
+          <button
+            style={{ ...S.primaryBtn, flex: 2 }}
+            disabled={isBusy || (!isLayout && !targetInstance) || (isLayout && !promptState.hasContent)}
+            onClick={() => {
+              if (isLayout) onGenerateLayout()
+              else if (targetInstance) onGenerateImage(targetInstance, referenceDataUrl)
+            }}
+          >
+            <Sparkles size={13} />
+            {isBusy ? 'Opening…' : isLayout ? 'Generate Layout' : 'Generate Image'}
+          </button>
+        </div>
+
+        <div style={{ fontSize: 10, color: '#555b6e', marginTop: 12, lineHeight: 1.5 }}>
+          {isLayout
+            ? 'The layout prompt is copied to your clipboard and your provider workspace opens.'
+            : 'Prompt is copied to clipboard. If a reference image is set, it is copied too — paste both into your provider, then upload the result here.'}
+        </div>
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, session, clipboard, net } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, session, clipboard, net, nativeImage } from 'electron'
 import { basename, dirname, extname, join } from 'path'
 import { spawn } from 'child_process'
 import {
@@ -3099,6 +3099,17 @@ ipcMain.handle('shell:openExternalUrl', async (_, url) => {
 ipcMain.handle('clipboard:writeText', async (_, text) => {
   try {
     clipboard.writeText(String(text ?? ''))
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('clipboard:writeImageFromDataURL', async (_, dataUrl) => {
+  try {
+    const img = nativeImage.createFromDataURL(String(dataUrl ?? ''))
+    if (img.isEmpty()) return { success: false, error: 'Invalid image data.' }
+    clipboard.writeImage(img)
     return { success: true }
   } catch (err) {
     return { success: false, error: err.message }
